@@ -19,6 +19,28 @@ partition, so the same history is available regardless of which OS is booted.
 
 Early scaffolding. See plan in this repo / project board.
 
+## Storage
+
+Tracelab persists everything to a single SQLite database, by default on the
+shared NTFS partition under `/run/media/kaik/AE62672C6266F88B/tracelab/`
+(configurable via `tracelab.toml`). The store uses `modernc.org/sqlite`
+(pure-Go, CGO-free) so the same binary cross-compiles to Linux and Windows.
+
+Schema (migration `0001_initial`):
+
+- `sessions(id TEXT PK, label, started_at, ended_at)` — one row per
+  test/debug run. IDs are 26-char lexicographically sortable hex strings.
+- `events(id, session_id FK→sessions ON DELETE CASCADE, ts, source, level, msg, meta)`
+  — append-only log/event stream, indexed by `(session_id, ts)`.
+- `crashes(id, session_id FK, ts, fingerprint, stacktrace, count)` —
+  deduplicated stacktrace clusters per session.
+- `screenshots(id, session_id FK, ts, path, trigger)` — paths are
+  stored relative to the configured datastore directory.
+
+Migrations are embedded into the binary (`//go:embed`) and applied
+idempotently on `Open` via a `schema_migrations` version table; no
+external migration tool is required at runtime.
+
 ## Building
 
 Requires Go 1.22+.
