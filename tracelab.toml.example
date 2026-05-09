@@ -4,11 +4,16 @@
 
 [server]
 port = 8765
-bind = "0.0.0.0"  # accessible from LAN/VMs; use "127.0.0.1" to lock down
+bind = "0.0.0.0"     # accessible from LAN/VMs; use "127.0.0.1" to lock down
+read_timeout  = "15s"
+write_timeout = "15s"
 
 [storage]
 datastore_path = "/run/media/kaik/AE62672C6266F88B/tracelab"
 # On Windows: "D:\\tracelab" (or whichever drive letter mounts the NTFS partition)
 
 [auth]
-token = "CHANGEME"  # shared secret for ingest endpoints; rotate per environment
+# Shared bearer secret for the API. Generate a fresh one per environment, e.g.:
+#   openssl rand -hex 32
+# The hub refuses to start while this is empty or the literal "CHANGEME".
+token = "CHANGEME"

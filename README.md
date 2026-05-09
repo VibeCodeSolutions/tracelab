@@ -41,9 +41,50 @@ Migrations are embedded into the binary (`//go:embed`) and applied
 idempotently on `Open` via a `schema_migrations` version table; no
 external migration tool is required at runtime.
 
+## API
+
+The hub exposes a small JSON HTTP API on `[server].bind:[server].port`
+(default `127.0.0.1:8765`). All endpoints except `/healthz` require a
+`Authorization: Bearer <token>` header matching `[auth].token`. Generate
+the token with `openssl rand -hex 32`.
+
+| Method | Path             | Auth | Purpose                                   |
+|--------|------------------|------|-------------------------------------------|
+| GET    | `/healthz`       | no   | Liveness probe — `{"status":"ok"}`.       |
+| POST   | `/session/start` | yes  | Start a session, returns `session_id`.    |
+| POST   | `/session/end`   | yes  | Mark a session ended (204 on success).    |
+| POST   | `/ingest`        | yes  | Batch-insert events (202 on accept).      |
+| GET    | `/sessions`      | yes  | List recent sessions (`?limit=N`).        |
+
+Examples (assuming `TOKEN=$(cat .token)`):
+
+    curl http://127.0.0.1:8765/healthz
+
+    curl -H "Authorization: Bearer $TOKEN" \
+         -X POST http://127.0.0.1:8765/session/start \
+         -d '{"label":"manual-smoke"}'
+
+    curl -H "Authorization: Bearer $TOKEN" \
+         -X POST http://127.0.0.1:8765/ingest \
+         -d '{"session_id":"<id>","events":[
+              {"source":"app","level":"INFO","msg":"hello"},
+              {"source":"app","level":"ERROR","msg":"boom","meta":{"k":"v"}}
+            ]}'
+
+    curl -H "Authorization: Bearer $TOKEN" \
+         -X POST http://127.0.0.1:8765/session/end \
+         -d '{"session_id":"<id>"}'
+
+    curl -H "Authorization: Bearer $TOKEN" \
+         "http://127.0.0.1:8765/sessions?limit=20"
+
+Event timestamps (`ts`) are optional unix-nanoseconds; the hub fills in
+`time.Now()` when omitted. `meta` is opaque JSON.
+
 ## Building
 
-Requires Go 1.22+.
+Requires Go 1.25+ (pulled in by `modernc.org/sqlite` ≥ 1.50; the toolchain
+self-upgrades automatically with `GOTOOLCHAIN=auto`).
 
     cp tracelab.toml.example tracelab.toml
     make build      # → dist/tracelab-hub
