@@ -1,0 +1,14 @@
+# Tracelab Hub configuration
+# Copy to tracelab.toml and adjust. The .example file is tracked,
+# tracelab.toml is gitignored.
+
+[server]
+port = 8765
+bind = "0.0.0.0"  # accessible from LAN/VMs; use "127.0.0.1" to lock down
+
+[storage]
+datastore_path = "/run/media/kaik/AE62672C6266F88B/tracelab"
+# On Windows: "D:\\tracelab" (or whichever drive letter mounts the NTFS partition)
+
+[auth]
+token = "CHANGEME"  # shared secret for ingest endpoints; rotate per environment

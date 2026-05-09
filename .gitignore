@@ -6,6 +6,7 @@
 *.dylib
 *.test
 *.out
+coverage.out
 /bin/
 /dist/
 vendor/
@@ -20,3 +21,4 @@ vendor/
 *.db-journal
 /data/
 tracelab.local.toml
+tracelab.toml

@@ -19,6 +19,20 @@ partition, so the same history is available regardless of which OS is booted.
 
 Early scaffolding. See plan in this repo / project board.
 
+## Building
+
+Requires Go 1.22+.
+
+    cp tracelab.toml.example tracelab.toml
+    make build      # → dist/tracelab-hub
+    make run        # runs from source
+
+Cross-compile for Windows:
+
+    GOOS=windows GOARCH=amd64 go build -o dist/tracelab-hub.exe ./cmd/hub
+
+Other targets: `make vet`, `make test`, `make tidy`, `make clean`.
+
 ## License
 
 MIT
