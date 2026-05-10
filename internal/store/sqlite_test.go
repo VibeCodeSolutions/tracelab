@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -164,6 +166,121 @@ func TestForeignKeyCascade(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("events should cascade-delete, got %d remaining", n)
+	}
+}
+
+func TestUpsertCrashFirstInsert(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateSession(ctx, "crash-1")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	ts := time.Unix(1700000000, 0)
+	if err := s.UpsertCrash(ctx, id, ts, "fp-001-abc", "stack body\n at Foo.bar"); err != nil {
+		t.Fatalf("UpsertCrash: %v", err)
+	}
+
+	crashes, err := s.CrashesBySession(ctx, id)
+	if err != nil {
+		t.Fatalf("CrashesBySession: %v", err)
+	}
+	if len(crashes) != 1 {
+		t.Fatalf("want 1 crash row, got %d", len(crashes))
+	}
+	c := crashes[0]
+	if c.Count != 1 {
+		t.Errorf("count = %d, want 1", c.Count)
+	}
+	if c.Fingerprint != "fp-001-abc" {
+		t.Errorf("fingerprint = %q, want fp-001-abc", c.Fingerprint)
+	}
+	if !c.TS.Equal(ts) {
+		t.Errorf("ts = %v, want %v", c.TS, ts)
+	}
+}
+
+func TestUpsertCrashDedup(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateSession(ctx, "crash-dedup")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		ts := time.Unix(int64(1700000000+i), 0)
+		if err := s.UpsertCrash(ctx, id, ts, "fp-dup", "trace v"+string(rune('0'+i))); err != nil {
+			t.Fatalf("UpsertCrash #%d: %v", i, err)
+		}
+	}
+
+	crashes, err := s.CrashesBySession(ctx, id)
+	if err != nil {
+		t.Fatalf("CrashesBySession: %v", err)
+	}
+	if len(crashes) != 1 {
+		t.Fatalf("want 1 dedup row, got %d", len(crashes))
+	}
+	if crashes[0].Count != 3 {
+		t.Errorf("count = %d, want 3", crashes[0].Count)
+	}
+	// TS should reflect the most recent occurrence.
+	wantTS := time.Unix(1700000002, 0)
+	if !crashes[0].TS.Equal(wantTS) {
+		t.Errorf("ts = %v, want %v", crashes[0].TS, wantTS)
+	}
+	// Stacktrace stays at the first-inserted body (we don't overwrite).
+	if crashes[0].Stacktrace != "trace v0" {
+		t.Errorf("stacktrace = %q, want trace v0 (first insert wins)", crashes[0].Stacktrace)
+	}
+}
+
+func TestUpsertCrashDistinctFingerprints(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateSession(ctx, "crash-distinct")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ts := time.Unix(1700000000, 0)
+	if err := s.UpsertCrash(ctx, id, ts, "fp-a", "trace A"); err != nil {
+		t.Fatalf("UpsertCrash A: %v", err)
+	}
+	if err := s.UpsertCrash(ctx, id, ts, "fp-b", "trace B"); err != nil {
+		t.Fatalf("UpsertCrash B: %v", err)
+	}
+	crashes, err := s.CrashesBySession(ctx, id)
+	if err != nil {
+		t.Fatalf("CrashesBySession: %v", err)
+	}
+	if len(crashes) != 2 {
+		t.Fatalf("want 2 distinct rows, got %d", len(crashes))
+	}
+}
+
+func TestUpsertCrashRejectsUnknownSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	err := s.UpsertCrash(ctx, "ghost-session", time.Now(), "fp", "stack")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("want sql.ErrNoRows for unknown session, got %v", err)
+	}
+}
+
+func TestUpsertCrashRejectsEmptyFingerprint(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, "crash-empty")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := s.UpsertCrash(ctx, id, time.Now(), "", "stack"); err == nil {
+		t.Fatal("want error for empty fingerprint, got nil")
 	}
 }
 

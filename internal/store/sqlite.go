@@ -310,6 +310,119 @@ func (s *Store) RecentEvents(ctx context.Context, sessionID string, limit int) (
 	return out, nil
 }
 
+// UpsertCrash records a crash for the given session. If a row with the
+// same (session_id, fingerprint) already exists, its count is incremented
+// and its ts is updated to the most recent occurrence (so the crash sorts
+// to the top in chronological views). Otherwise a new row is inserted
+// with count=1.
+//
+// The whole operation runs in a single transaction so concurrent ingests
+// can't race between the SELECT and the UPDATE/INSERT.
+//
+// Returns sql.ErrNoRows if the session id does not exist (the FK would
+// reject the insert path; the SELECT path explicitly checks first to
+// give callers a consistent error regardless of which branch was taken).
+func (s *Store) UpsertCrash(ctx context.Context, sessionID string, ts time.Time, fingerprint, stacktrace string) error {
+	if fingerprint == "" {
+		return fmt.Errorf("store: upsert crash: empty fingerprint")
+	}
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: upsert crash begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op on commit
+
+	// Verify session exists up-front so we surface a clean sql.ErrNoRows
+	// rather than a generic FK error on the INSERT branch.
+	var exists int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
+		return fmt.Errorf("store: upsert crash session-lookup: %w", err)
+	}
+
+	var crashID int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT id FROM crashes
+		WHERE session_id = ? AND fingerprint = ?
+		LIMIT 1
+	`, sessionID, fingerprint).Scan(&crashID)
+	switch {
+	case err == nil:
+		// Existing row → bump counter, refresh ts.
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE crashes
+			SET count = count + 1, ts = ?
+			WHERE id = ?
+		`, ts.UnixNano(), crashID); err != nil {
+			return fmt.Errorf("store: upsert crash bump: %w", err)
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO crashes(session_id, ts, fingerprint, stacktrace, count)
+			VALUES(?, ?, ?, ?, 1)
+		`, sessionID, ts.UnixNano(), fingerprint, stacktrace); err != nil {
+			return fmt.Errorf("store: upsert crash insert: %w", err)
+		}
+	default:
+		return fmt.Errorf("store: upsert crash lookup: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: upsert crash commit: %w", err)
+	}
+	return nil
+}
+
+// CrashRow is a denormalised view of a `crashes` table row, used by tests
+// and (later) by the read API.
+type CrashRow struct {
+	ID          int64
+	SessionID   string
+	TS          time.Time
+	Fingerprint string
+	Stacktrace  string
+	Count       int
+}
+
+// CrashesBySession returns all crashes for a session, newest first.
+// Used by tests and the future /crashes API.
+func (s *Store) CrashesBySession(ctx context.Context, sessionID string) ([]CrashRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, ts, fingerprint, stacktrace, count
+		FROM crashes
+		WHERE session_id = ?
+		ORDER BY ts DESC, id DESC
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: crashes by session: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CrashRow
+	for rows.Next() {
+		var c CrashRow
+		var tsNano int64
+		if err := rows.Scan(&c.ID, &c.SessionID, &tsNano, &c.Fingerprint, &c.Stacktrace, &c.Count); err != nil {
+			return nil, fmt.Errorf("store: scan crash: %w", err)
+		}
+		c.TS = time.Unix(0, tsNano)
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows crash: %w", err)
+	}
+	return out, nil
+}
+
 // ListSessions returns up to limit sessions, newest first.
 func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) {
 	if limit <= 0 {
