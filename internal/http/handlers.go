@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/VibeCodeSolutions/tracelab/internal/crash"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
 	"github.com/VibeCodeSolutions/tracelab/internal/ws"
 )
@@ -172,7 +174,48 @@ func (h *handlers) ingest(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	// Run stacktrace detection on each event. Crash-row upserts are
+	// best-effort: a failure here is logged but does NOT change the
+	// /ingest response — the events themselves are already durably
+	// persisted, and missing crash-table entries are recoverable from the
+	// raw event log.
+	h.detectAndUpsertCrashes(r.Context(), req.SessionID, batch)
+
 	writeJSON(w, http.StatusAccepted, ingestResp{Ingested: len(batch)})
+}
+
+// detectAndUpsertCrashes scans each event for a stacktrace and, on match,
+// upserts a row into the crashes table. Errors are logged and swallowed
+// to keep /ingest 202-clean (see ADR-006).
+func (h *handlers) detectAndUpsertCrashes(ctx context.Context, sessionID string, batch []store.Event) {
+	for _, e := range batch {
+		res := crash.Detect(e.Source, e.Level, e.Msg, nil)
+		if !res.Matched {
+			continue
+		}
+		fp := crash.Fingerprint(res.NormalizedStack)
+		if fp == "" {
+			continue
+		}
+		ts := e.TS
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		if err := h.store.UpsertCrash(ctx, sessionID, ts, fp, e.Msg); err != nil {
+			h.log.LogAttrs(ctx, slog.LevelWarn, "crash upsert failed",
+				slog.String("session_id", sessionID),
+				slog.String("language", string(res.Language)),
+				slog.String("fingerprint", fp),
+				slog.Any("error", err),
+			)
+			continue
+		}
+		h.log.LogAttrs(ctx, slog.LevelInfo, "crash detected",
+			slog.String("session_id", sessionID),
+			slog.String("language", string(res.Language)),
+			slog.String("fingerprint", fp),
+		)
+	}
 }
 
 type sessionView struct {
