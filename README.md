@@ -55,6 +55,12 @@ the token with `openssl rand -hex 32`.
 | POST   | `/session/end`   | yes  | Mark a session ended (204 on success).    |
 | POST   | `/ingest`        | yes  | Batch-insert events (202 on accept).      |
 | GET    | `/sessions`      | yes  | List recent sessions (`?limit=N`).        |
+| GET    | `/tail`          | yes  | WebSocket fan-out, optional `?session=<id>` filter. |
+
+The token must be sent as an `Authorization: Bearer <token>` **header** —
+the hub does not accept the token as a query string parameter (also not on
+`/tail`, where browsers cannot set custom WebSocket headers; use a CLI
+client like `websocat -H` instead).
 
 Examples (assuming `TOKEN=$(cat .token)`):
 

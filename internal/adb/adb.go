@@ -13,9 +13,14 @@
 //
 // Lifecycle: callers own the context. Cancelling the context passed to
 // LogcatStream causes the underlying adb subprocess to be terminated
-// (SIGTERM, escalated to SIGKILL after 3s) and the returned channel to
-// be closed by the reader goroutine. Devices() uses a short timeout
-// (10s by default) so a hung adb daemon can't block the caller forever.
+// and the returned channel to be closed by the reader goroutine.
+// Termination is POSIX-first: SIGTERM, escalated to SIGKILL after 3s.
+// On Windows, Process.Signal(SIGTERM) is a no-op (returns an error that
+// is intentionally ignored) and the 3-second grace period elapses before
+// Process.Kill (TerminateProcess) ends the subprocess — i.e. cancellation
+// on Windows is functionally a hard kill with a delay, not a graceful
+// shutdown. Devices() uses a short timeout (10s by default) so a hung
+// adb daemon can't block the caller forever.
 package adb
 
 import (
@@ -230,8 +235,11 @@ func parseDeviceLine(line string) (Device, bool) {
 //
 // Cancellation: when ctx is cancelled the underlying adb subprocess is sent
 // SIGTERM; if it does not exit within killGracePeriod (3s), SIGKILL is sent.
-// The reader goroutine drains and closes the returned channel before
-// returning, so receivers can safely range over it.
+// On Windows, SIGTERM is not deliverable (Process.Signal returns an
+// ignored error) and the kill path runs after the 3s grace period via
+// Process.Kill (TerminateProcess). The reader goroutine drains and
+// closes the returned channel before returning, so receivers can safely
+// range over it.
 //
 // Errors during startup (binary not found, exec.Start failure) are returned
 // synchronously. Errors during streaming (parse failure, subprocess exit
@@ -291,10 +299,11 @@ func LogcatStream(ctx context.Context, deviceSerial, tagFilter string) (<-chan L
 		}
 	}()
 
-	// Cancel watcher: blocks on ctx.Done, then escalates SIGTERM → SIGKILL.
-	// Owned by the goroutine itself; exits when the watched ctx fires
-	// *or* when stopCancel is closed (which the reader goroutine does on
-	// natural subprocess exit, to release this goroutine).
+	// Cancel watcher: blocks on ctx.Done, then escalates SIGTERM → SIGKILL
+	// (POSIX); on Windows the SIGTERM call no-ops and the kill path runs
+	// after killGracePeriod. Owned by the goroutine itself; exits when the
+	// watched ctx fires *or* when stopCancel is closed (which the reader
+	// goroutine does on natural subprocess exit, to release this goroutine).
 	stopCancel := make(chan struct{})
 	go func() {
 		select {
