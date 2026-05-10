@@ -3,7 +3,7 @@ type: worklog
 projekt: tracelab
 status: aktiv
 last-updated: 2026-05-10
-qs-letzter-lauf: qs-20260510-004
+qs-letzter-lauf: qs-20260510-005
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -11,9 +11,9 @@ qs-letzter-lauf: qs-20260510-004
 > Auftragslogbuch für das Projekt **Tracelab** (Cross-Platform Test-Log-Hub, Go-Stack).
 > **2026-05-10 Migration:** WORKLOG ist ab jetzt im Repo unter `docs/WORKLOG.md`. Vorgänger-Datei lag unter `~/.claude/projects/-home-kaik-Projekte-tracelab/worklogs/vc.md` (Project-Memory) und ist als Read-only-Archiv mit Migrations-Hinweis dort verblieben.
 
-## Offener Backlog (konsolidiert M1–M10)
+## Offener Backlog (konsolidiert M1–M12)
 
-Aus den QS-Läufen qs-20260510-001 bis -004. Alle Minor, kein Re-Lauf nötig — werden bei Phase-1-Tail-Aufräumer oder thematisch beim nächsten Touch des betroffenen Pakets aufgeräumt.
+Aus den QS-Läufen qs-20260510-001 bis -005. Alle Minor, kein Re-Lauf nötig — werden bei Phase-1-Tail-Aufräumer oder thematisch beim nächsten Touch des betroffenen Pakets aufgeräumt.
 
 | ID | Quelle | Datei:Bereich | Beschreibung |
 |---|---|---|---|
@@ -27,6 +27,8 @@ Aus den QS-Läufen qs-20260510-001 bis -004. Alle Minor, kein Re-Lauf nötig —
 | **M8** | qs-004 (S6) | `internal/adb/adb.go` (LogcatStream Cancel) | Code-Kommentar verspricht Cross-Platform, Cancel-Pfad nutzt POSIX-Signals. Doc präzisieren oder Windows-Pfad implementieren |
 | **M9** | qs-004 (S6) | `internal/adb/adb.go` | `SetBinary(name) string` ist Test-Override, leakt in Public-API. Lösung: `internal_test.go` mit nicht-exportierter Variante oder build-tag |
 | **M10** | qs-004 (S6) | `internal/adb/adb_test.go` | `go.uber.org/goleak` für robustes Goroutine-Leak-Detection in TearDown der LogcatStream-Tests |
+| **M11** | qs-005 (S7) | `internal/adb/bridge.go:299-300` ↔ `internal/http/handlers.go:159+165` ↔ `README.md:88-90` | Publish/Insert-Reihenfolge inkonsistent: ADB-Bridge published synchron beim Append, /ingest published nach Insert. README behauptet Symmetrie. Entscheidung im Tail-Sprint: entweder Reihenfolge angleichen (Latenz steigt auf Batch-Intervall) ODER README präzisieren ("Live-Stream konsistent zum Subprocess, DB kann dahinter zurückfallen") — letzteres hat Forensik-Vorteil |
+| **M12** | qs-005 (S7) | `internal/adb/bridge_test.go:261` | Tautologischer Msg-Check vergleicht Element gegen sich selbst. Soll-Array `wantMsgs := []string{...}` analog `wantLevels` (Z. 253) |
 
 **Zusätzlicher Hint (kein Finding):** `httplayer.Config.{Read,Write}Timeout`-Felder unbenutzt — beim nächsten http-Pkg-Touch aufräumen.
 
@@ -56,10 +58,13 @@ Aus den QS-Läufen qs-20260510-001 bis -004. Alle Minor, kein Re-Lauf nötig —
   - `go vet`/`build` clean
   - Smoke gegen Daemon (mit fake-adb-PATH-Override): Bridge startet bei `enabled=true`, schreibt Lines in events, `/tail`-Subscriber empfängt sie. SIGTERM stoppt Bridge **vor** Hub-Close (ordering verifizieren in slog).
   - README-Section drin, toml-Beispiel kommentiert
-- **Status:** erledigt — DoD grün, wartet auf QS (tuvok)
+- **Status:** QS grün — Findings-Gate freigegeben (qs-20260510-005), 2 Minor → Backlog M11-M12
 - **Verlauf:**
   - `2026-05-10` — Admin entscheidet: Daemon-Wireup wird P1-S7 vor Merge nachgezogen, kein Phase-1.5. Eröffnet aus Bookmark in #007. Klasse 🟡 feature, Worker-Spawn ballard.
   - `2026-05-10` — belanna übernommen. Mehrere Komponenten (config-extension, bridge-goroutine, reconnect-backoff, level-mapping, README) — Worker-Spawn ballard via Subagent (Konsistenz Sprint-Reihe, Code-Implementation mehrerer Files inkl. cmd/hub-Integration).
+  - `2026-05-10` — QS-Lauf gestartet (tuvok, qs-20260510-005).
+  - `2026-05-10` — QS-Lauf qs-20260510-005 abgeschlossen. `go vet ./...` + `go build ./...` clean, `go test -race -count=3 ./internal/adb/... ./cmd/hub/...` und `go test -race -count=1 ./...` grün. Bridge-Lifecycle-Sequenz (bridgeCancel+wait → hub.Close → srv.Shutdown) im Code und in Integration-Test via slog-Index verifiziert. Per-reconnect-Session, Backoff-Reset bei gotLines, 50ms/50-Lines-Batch ohne Doppel-Flush-Race, Detached-2s-Flush, Level-Mapping V/D/I/W/E/F/S vollständig — alles wie spezifiziert. Sicherheits-Spot-Check: TagFilter/DeviceSerial fließen als argv (kein Shell-Injection-Vektor). **Findings: 0 Blocker / 0 Major / 2 Minor.** VC-008-KOR-01: Bridge ruft `Hub.Publish` SYNCHRON beim append in den Batch-Puffer (bridge.go:299-300), `/ingest` publisht aber NUR NACH erfolgreichem `InsertEvents` (handlers.go:159+165). README Z. 88-90 behauptet Symmetrie ("Persistence and /tail fan-out work exactly like a normal /ingest POST"). Folge: bei `InsertEvents`-Fehler sind ADB-Lines live im Hub aber nicht in der DB — über /ingest unmöglich. VC-008-WAR-01: bridge_test.go Z. 261 hat einen tautologischen Msg-Check (`e.Msg != "T: "+got[i].Msg[len("T: "):]` vergleicht ein Element gegen sich selbst), prüft also faktisch nichts. Status: `freigabe`.
+  - `2026-05-10` — **Findings-Gate (chakotay)**: M11 (Publish/Insert-Asymmetrie) ist sachlich — README präzisieren ist kleinerer Fix als Code-Refactor; Live-Stream-Konsistenz hat Forensik-Vorteil. M12 ist Test-Robustheit. **Freigabe**, M11+M12 → Backlog. Auftrag #008 geschlossen. **Phase 1 (S1-S7) damit feature-complete und mergebar.** Halte bei Admin an für Phase-1-Closure-Approval (FF-Merge + Branch-Cleanup + Backlog-Strategie).
   - `2026-05-10` — ballard übernommen. 4 Commits gepusht: `c572f02` config [adb], `7db5cd4` bridge.go+tests, `0ca3b12` cmd/hub wireup+integration-test, `2016669` README-Section. **Bridge-Architektur:** `adb.Bridge` mit `BridgeStore`/`BridgePublisher`-Interfaces (Test-Injection), `streamFunc` als unexported Test-Override für LogcatStream. Per-reconnect neue Session via `Store.CreateSession(...)`, Backoff 1s/2s/5s/10s+constant, Counter-Reset bei mind. 1 Line. Batch-Insert 50ms-OR-50-Lines (Timer-Reset bei Size-Flush). Level-Mapping: V/D→debug, I→info, W→warn, E/F→error, S→drop. Events parallel via `Hub.Publish` für /tail-Live-Stream. Detached 2s-Timeout-Context für Final-Flush+EndSession damit Shutdown-Lines noch landen. **Lifecycle in cmd/hub:** Bridge-ctx aus signal.NotifyContext-ctx abgeleitet, expliziter `bridgeCancel()`+wait-on-bridgeDone vor `hub.Close()` vor `srv.Shutdown()`. Slog-Marker `adb bridge stopped` → `websocket hub closed` → `http server stopped`. **Tests:** 5 neue bridge_test.go (level-mapping, all-levels-line-flow incl. metadata, reconnect-creates-new-session, backoff-between-attempts, stream-error, ctx-cancel cleanup) + 1 cmd/hub integration-test (echtes Binary + fake-adb-PATH-shim, verifiziert events-Tabelle + slog-Stop-Order). Race-clean, vet/build clean, full-suite grün. **Smoke:** Binary mit fake-adb gestartet, 5 Lines pro Reconnect-Session in events-Tabelle, slog-Stop-Reihenfolge wie spezifiziert verifiziert.
 
 ---
