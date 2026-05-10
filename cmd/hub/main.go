@@ -22,6 +22,7 @@ import (
 	"github.com/VibeCodeSolutions/tracelab/internal/config"
 	httplayer "github.com/VibeCodeSolutions/tracelab/internal/http"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
+	"github.com/VibeCodeSolutions/tracelab/internal/ws"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -63,21 +64,29 @@ func run() error {
 		}
 	}()
 
+	hub := ws.NewHub(0)
+	defer hub.Close()
+
 	addr := cfg.Server.Bind + ":" + strconv.Itoa(cfg.Server.Port)
 	handler := httplayer.New(st, httplayer.Config{
 		AuthToken:    cfg.Auth.Token,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		Logger:       logger,
+		Hub:          hub,
 	})
 	if handler == nil {
 		return errors.New("http: New returned nil (auth token empty?)")
 	}
+	// NOTE: WriteTimeout on the underlying http.Server is intentionally
+	// not propagated here because it would also apply to long-lived
+	// /tail websocket connections (after Hijack the deadline still ticks
+	// on the underlying conn for the *original* response). We rely on
+	// ws.PingPeriod / ws.PongWait to detect dead clients instead.
 	srv := &stdhttp.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+		Addr:        addr,
+		Handler:     handler,
+		ReadTimeout: cfg.Server.ReadTimeout,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -106,6 +115,11 @@ func run() error {
 			return fmt.Errorf("http server: %w", err)
 		}
 	}
+
+	// Close the WS hub before srv.Shutdown so /tail handlers send their
+	// close frames and release the hijacked conns; otherwise srv.Shutdown
+	// would wait for them until shutdownCtx expires.
+	hub.Close()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

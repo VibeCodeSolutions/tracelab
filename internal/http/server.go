@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
+	"github.com/VibeCodeSolutions/tracelab/internal/ws"
 )
 
 // Config controls runtime parameters of the HTTP layer that are not
@@ -32,6 +33,10 @@ type Config struct {
 	// Logger is the slog handler used by the request logger middleware. If nil,
 	// slog.Default() is used.
 	Logger *slog.Logger
+
+	// Hub is the WebSocket pub/sub fan-out for /tail. If nil, /tail is not
+	// registered and /ingest skips the broadcast step.
+	Hub *ws.Hub
 }
 
 // New constructs the chi router with the full middleware stack and routes
@@ -56,19 +61,29 @@ func New(st *store.Store, cfg Config) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(slogRequestLogger(logger))
-	r.Use(middleware.Timeout(30 * time.Second))
 
-	h := &handlers{store: st, log: logger}
+	h := &handlers{store: st, hub: cfg.Hub, log: logger}
 
 	// /healthz is intentionally outside the auth group.
 	r.Get("/healthz", h.healthz)
 
+	// /tail is auth-protected (registered in the pr group below) but must
+	// NOT be wrapped by middleware.Timeout — chi's Timeout uses
+	// http.TimeoutHandler, which is incompatible with hijacked connections
+	// (websocket upgrades). So we register the timeout middleware in a
+	// nested sub-group that excludes /tail.
 	r.Group(func(pr chi.Router) {
 		pr.Use(bearerAuth(cfg.AuthToken))
-		pr.Post("/session/start", h.sessionStart)
-		pr.Post("/session/end", h.sessionEnd)
-		pr.Post("/ingest", h.ingest)
-		pr.Get("/sessions", h.listSessions)
+		if cfg.Hub != nil {
+			pr.Get("/tail", ws.Handler(cfg.Hub, logger))
+		}
+		pr.Group(func(tr chi.Router) {
+			tr.Use(middleware.Timeout(30 * time.Second))
+			tr.Post("/session/start", h.sessionStart)
+			tr.Post("/session/end", h.sessionEnd)
+			tr.Post("/ingest", h.ingest)
+			tr.Get("/sessions", h.listSessions)
+		})
 	})
 
 	return r

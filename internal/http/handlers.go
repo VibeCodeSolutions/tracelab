@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
+	"github.com/VibeCodeSolutions/tracelab/internal/ws"
 )
 
 // handlers groups the per-route handler funcs with their dependencies so
 // they can be wired in server.go without package-level state.
 type handlers struct {
 	store *store.Store
+	hub   *ws.Hub
 	log   *slog.Logger
 }
 
@@ -155,6 +157,20 @@ func (h *handlers) ingest(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertEvents(r.Context(), req.SessionID, batch); err != nil {
 		h.internalError(w, r, "ingest failed", err)
 		return
+	}
+	// Fan out to /tail subscribers after a successful DB insert. The hub
+	// performs non-blocking sends, so a slow WS client never stalls ingest.
+	if h.hub != nil {
+		for _, e := range batch {
+			h.hub.Publish(ws.Event{
+				SessionID: req.SessionID,
+				TS:        e.TS.UnixNano(),
+				Source:    e.Source,
+				Level:     e.Level,
+				Msg:       e.Msg,
+				Meta:      e.Meta,
+			})
+		}
 	}
 	writeJSON(w, http.StatusAccepted, ingestResp{Ingested: len(batch)})
 }
