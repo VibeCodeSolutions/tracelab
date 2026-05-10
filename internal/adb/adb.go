@@ -6,10 +6,12 @@
 //   - LogcatStream: a context-cancellable stream of parsed logcat lines from
 //     a given device via `adb -s <serial> logcat -v threadtime`.
 //
-// The package shells out to a real `adb` binary located via $PATH (the
-// default) or via SetBinary for tests. No CGO, no transport-level ADB
-// re-implementation — the upstream tool already does that job well and
-// ships on every dev box that talks to Android hardware.
+// The package shells out to a real `adb` binary located via $PATH. No CGO,
+// no transport-level ADB re-implementation — the upstream tool already
+// does that job well and ships on every dev box that talks to Android
+// hardware. Tests that need to redirect the binary use t.Setenv("PATH",
+// ...) to inject a fake adb into PATH; there is no production-visible
+// override hook.
 //
 // Lifecycle: callers own the context. Cancelling the context passed to
 // LogcatStream causes the underlying adb subprocess to be terminated
@@ -39,24 +41,15 @@ import (
 	"time"
 )
 
-// adbBinary is the executable name passed to exec.LookPath. Overridable
-// for tests via SetBinary so we can drop a fake script in PATH and point
-// at it without polluting the user's environment.
+// adbBinary is the executable name passed to exec.LookPath. The test
+// suite injects a fake by manipulating PATH (see withFakeAdb in
+// adb_test.go); there is no production override hook. A test-only
+// helper for swapping the binary name lives in export_test.go and only
+// exists during `go test`.
 var (
 	adbBinaryMu sync.RWMutex
 	adbBinary   = "adb"
 )
-
-// SetBinary overrides the adb executable name resolved against PATH.
-// Intended for tests; production callers should leave the default "adb".
-// Returns the previous value so tests can restore it via t.Cleanup.
-func SetBinary(name string) string {
-	adbBinaryMu.Lock()
-	defer adbBinaryMu.Unlock()
-	prev := adbBinary
-	adbBinary = name
-	return prev
-}
 
 func currentBinary() string {
 	adbBinaryMu.RLock()
@@ -194,6 +187,20 @@ func parseDevices(raw []byte) ([]Device, error) {
 //
 //	<serial> <state> [key:value ...]
 //
+// Most states are single-word ("device", "offline", "unauthorized",
+// "recovery", "sideload", "bootloader") but adb emits at least one
+// multi-word state in the wild — "no permissions" — and follows it with
+// a free-form, semicolon-prefixed hint such as:
+//
+//	0123456789ABCDEF  no permissions; user in plugdev group; see [http://...]
+//
+// Treating that line with naive Fields-splitting would pin State="no"
+// and pollute the key:value scan with permission-text tokens. The fix:
+// detect known multi-word states explicitly and consume the trailer up
+// to the next genuine key:value token (or EOL), then let the key:value
+// loop process whatever remains. Unknown trailing tokens that don't
+// contain a ':' are silently ignored, matching the original tolerance.
+//
 // Returns (zero, false) if the line does not have the minimum two
 // whitespace-separated tokens.
 func parseDeviceLine(line string) (Device, bool) {
@@ -201,13 +208,20 @@ func parseDeviceLine(line string) (Device, bool) {
 	if len(fields) < 2 {
 		return Device{}, false
 	}
-	dev := Device{
-		Serial: fields[0],
-		State:  fields[1],
-	}
-	for _, kv := range fields[2:] {
+	dev := Device{Serial: fields[0]}
+
+	// State + index of the first token after the state. By default the
+	// state is one word at fields[1]; multi-word states extend this.
+	state, kvStart := extractState(fields[1:])
+	dev.State = state
+	kvStart++ // account for fields[0] (serial) we sliced past above
+	for _, kv := range fields[kvStart:] {
 		idx := strings.IndexByte(kv, ':')
 		if idx <= 0 || idx == len(kv)-1 {
+			// Free-form trailer tokens after a multi-word state (e.g.
+			// "user", "in", "plugdev") fall through here and are
+			// dropped. Same path silently skips anything else that
+			// doesn't carry a ':' value pair.
 			continue
 		}
 		key, val := kv[:idx], kv[idx+1:]
@@ -228,6 +242,64 @@ func parseDeviceLine(line string) (Device, bool) {
 		}
 	}
 	return dev, true
+}
+
+// extractState resolves the device state from the fields slice that
+// starts immediately after the serial. It returns the canonical state
+// string and the index (within the input slice) of the first token
+// after the state. For the common single-word case the state is
+// fields[0] and the returned index is 1. For known multi-word states
+// it collapses the words and additionally skips any free-form trailer
+// tokens that follow until the next key:value pair or end of line.
+//
+// The list is deliberately small — only states adb is known to emit
+// as multi-word. New entries here should match upstream's
+// transport_state_name table.
+func extractState(fields []string) (state string, next int) {
+	if len(fields) == 0 {
+		return "", 0
+	}
+	// Two-word states. The cheapest robust check is a literal table:
+	// adb emits a tiny finite set, no need for regex or generic logic.
+	if len(fields) >= 2 {
+		two := fields[0] + " " + strings.TrimRight(fields[1], ";")
+		switch two {
+		case "no permissions":
+			// Trailer after "no permissions" is free-form text like
+			// "; user in plugdev group; see [http://...]" — consume
+			// tokens until we hit a real key:value pair.
+			idx := 2
+			for idx < len(fields) {
+				if isKeyValueToken(fields[idx]) {
+					break
+				}
+				idx++
+			}
+			return two, idx
+		}
+	}
+	// Default: single-word state.
+	return fields[0], 1
+}
+
+// isKeyValueToken reports whether tok looks like a `key:value` pair
+// emitted by `adb devices -l` (e.g. `product:foo`, `transport_id:1`).
+// We use the same minimal heuristic as the kv-loop: a non-empty key,
+// a single ':' at a non-edge position, and a non-empty value.
+func isKeyValueToken(tok string) bool {
+	idx := strings.IndexByte(tok, ':')
+	if idx <= 0 || idx == len(tok)-1 {
+		return false
+	}
+	// Reject `http://` style URLs by requiring the key prefix to be
+	// alpha/underscore only — adb keys are simple identifiers.
+	for i := 0; i < idx; i++ {
+		c := tok[i]
+		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			return false
+		}
+	}
+	return true
 }
 
 // LogcatStream starts `adb -s <serial> logcat -v threadtime [<tagFilter>:V *:S]`

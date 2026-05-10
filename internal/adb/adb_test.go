@@ -10,7 +10,18 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
+
+// TestMain installs goleak so any LogcatStream goroutine (reader,
+// cancel-watcher, stderr-drainer) that survives a test is flagged
+// before the package-level process exits. goleak.VerifyTestMain calls
+// m.Run, then asserts there are no extra goroutines, retrying with a
+// short backoff to tolerate teardown races.
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 // withFakeAdb writes a shell script named "adb" into a tmpdir, prepends
 // that dir to PATH for the test, and returns the dir. The script body
@@ -149,6 +160,110 @@ func TestParseDevices_EmptyOutput(t *testing.T) {
 	}
 	if len(devs) != 0 {
 		t.Fatalf("nil output: want 0, got %d", len(devs))
+	}
+}
+
+// TestParseDeviceLine_MultiWordStates covers the multi-word state
+// branch added for M7. The bare "no permissions" two-word state plus
+// its various free-form trailers ("; user in plugdev group", "; see
+// [http://...]") must collapse into a single State value without
+// polluting Serial or the trailing key:value scan.
+func TestParseDeviceLine_MultiWordStates(t *testing.T) {
+	cases := []struct {
+		name        string
+		line        string
+		wantSerial  string
+		wantState   string
+		wantProduct string
+		wantModel   string
+		wantDevice  string
+		wantTID     int
+	}{
+		{
+			name:       "no permissions bare",
+			line:       "0123456789ABCDEF no permissions",
+			wantSerial: "0123456789ABCDEF",
+			wantState:  "no permissions",
+		},
+		{
+			name:       "no permissions with plugdev hint",
+			line:       "0123456789ABCDEF no permissions; user in plugdev group",
+			wantSerial: "0123456789ABCDEF",
+			wantState:  "no permissions",
+		},
+		{
+			name:       "no permissions with see-url hint",
+			line:       "0123456789ABCDEF no permissions; see [http://developer.android.com/tools/device.html] for more information",
+			wantSerial: "0123456789ABCDEF",
+			wantState:  "no permissions",
+		},
+		{
+			name:        "no permissions followed by -l key:value tail",
+			line:        "0123456789ABCDEF no permissions; user in plugdev group product:sdk_gphone64_x86_64 model:Pixel_6 device:emu64x transport_id:9",
+			wantSerial:  "0123456789ABCDEF",
+			wantState:   "no permissions",
+			wantProduct: "sdk_gphone64_x86_64",
+			wantModel:   "Pixel_6",
+			wantDevice:  "emu64x",
+			wantTID:     9,
+		},
+		{
+			name:       "single-word unauthorized still works",
+			line:       "FF99GG11 unauthorized",
+			wantSerial: "FF99GG11",
+			wantState:  "unauthorized",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dev, ok := parseDeviceLine(tc.line)
+			if !ok {
+				t.Fatalf("parseDeviceLine returned false for %q", tc.line)
+			}
+			if dev.Serial != tc.wantSerial {
+				t.Errorf("serial: %q want %q", dev.Serial, tc.wantSerial)
+			}
+			if dev.State != tc.wantState {
+				t.Errorf("state: %q want %q", dev.State, tc.wantState)
+			}
+			if dev.Product != tc.wantProduct {
+				t.Errorf("product: %q want %q", dev.Product, tc.wantProduct)
+			}
+			if dev.Model != tc.wantModel {
+				t.Errorf("model: %q want %q", dev.Model, tc.wantModel)
+			}
+			if dev.Device != tc.wantDevice {
+				t.Errorf("device: %q want %q", dev.Device, tc.wantDevice)
+			}
+			if dev.TransportID != tc.wantTID {
+				t.Errorf("transport_id: %d want %d", dev.TransportID, tc.wantTID)
+			}
+		})
+	}
+}
+
+// TestParseDevices_NoPermissionsTabSeparated covers the canonical bare
+// `adb devices` output where columns are tab-separated. The parser
+// uses strings.Fields which treats tabs and spaces equivalently, so
+// the multi-word state recognition kicks in the same way.
+func TestParseDevices_NoPermissionsTabSeparated(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		"List of devices attached",
+		"0123456789ABCDEF\tno permissions; user in plugdev group; see [http://developer.android.com/tools/device.html] for more information",
+		"",
+	}, "\n"))
+	devs, err := parseDevices(raw)
+	if err != nil {
+		t.Fatalf("parseDevices: %v", err)
+	}
+	if len(devs) != 1 {
+		t.Fatalf("want 1 device, got %d", len(devs))
+	}
+	if devs[0].Serial != "0123456789ABCDEF" {
+		t.Errorf("serial: %q", devs[0].Serial)
+	}
+	if devs[0].State != "no permissions" {
+		t.Errorf("state: %q want %q", devs[0].State, "no permissions")
 	}
 }
 

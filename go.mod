@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/gorilla/websocket v1.5.3
+	go.uber.org/goleak v1.3.0
 	modernc.org/sqlite v1.50.0
 )
 
