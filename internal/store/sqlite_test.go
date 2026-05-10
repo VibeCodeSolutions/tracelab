@@ -34,8 +34,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("want version 1, got %d", version)
+	if version != 2 {
+		t.Fatalf("want version 2, got %d", version)
 	}
 
 	// All four tables must exist.
@@ -47,6 +47,16 @@ func TestOpenAndMigrate(t *testing.T) {
 		if err != nil {
 			t.Errorf("table %s missing: %v", tbl, err)
 		}
+	}
+
+	// Migration 0002: unique index on (session_id, fingerprint) must exist.
+	var idxName string
+	err = s.db.QueryRowContext(context.Background(),
+		`SELECT name FROM sqlite_master WHERE type='index' AND name=?`,
+		"idx_crashes_session_fp",
+	).Scan(&idxName)
+	if err != nil {
+		t.Errorf("idx_crashes_session_fp missing: %v", err)
 	}
 }
 
@@ -135,8 +145,8 @@ func TestIdempotentMigrations(t *testing.T) {
 		`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("schema_migrations count = %d, want 1 (idempotent)", count)
+	if count != 2 {
+		t.Fatalf("schema_migrations count = %d, want 2 (idempotent)", count)
 	}
 }
 

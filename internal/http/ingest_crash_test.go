@@ -136,25 +136,28 @@ func TestIngestStacktraceDedupCounter(t *testing.T) {
 	}
 }
 
-func TestIngestUpsertCrashFailureDoesNotBreakResponse(t *testing.T) {
-	// We close the underlying store right before /ingest, so
-	// store.InsertEvents will already fail (500). To target the
-	// crash-upsert specifically we need a stable failure point — but
-	// closing the store breaks InsertEvents too, which short-circuits
-	// before we ever reach UpsertCrash.
-	//
-	// Strategy: we instead verify the contract by INSPECTING the source
-	// path: handlers.go::ingest calls h.detectAndUpsertCrashes AFTER
-	// writing the response decision but UNCONDITIONALLY before
-	// writeJSON. The function logs+continues on UpsertCrash errors
-	// (verified by review). A full failure-injection test would need an
-	// interface-based store mock — that's a follow-up paket if
-	// dedup-failure ever becomes a real concern in prod.
-	//
-	// As a smoke check we instead verify that ingest still succeeds when
-	// the session is ENDED (no FK violation, just normal flow) and a
-	// crash event arrives — this is the most realistic failure-adjacent
-	// path we can exercise without mocks.
+// TestIngestStacktraceAfterSessionEndStillRecorded documents the
+// best-effort crash-upsert behaviour from handlers.go::ingest: a crash
+// arriving after /session/end is informational — the session row still
+// exists, the FK still resolves, and the crash row is written.
+//
+// Documented behaviour we cannot reproduce here without a mock: if
+// store.UpsertCrash itself fails, handlers.detectAndUpsertCrashes logs
+// the error and continues; the /ingest response is unaffected (the row
+// has already been written to events). Reproducing that failure path
+// requires a Store-Interface mock — see M5 follow-up (qs-20260510-003).
+//
+// Pattern choice: we kept the smoke-test variant rather than extracting
+// a Store interface. Today handlers.handlers holds *store.Store
+// directly; extracting an interface for a single failure-injection test
+// would ripple through server.go::New and the *store.Store call sites
+// (CreateSession, EndSession, InsertEvents, UpsertCrash, ListSessions,
+// CrashesBySession, RecentEvents — 7 methods). The benefit/cost ratio
+// doesn't justify it for a "logs and continues" path that has zero
+// production callers depending on the error surfacing. If a future
+// finding promotes upsert-failure to a hard 5xx or a retry path, the
+// interface extraction becomes worthwhile and is scoped as M5-follow-up.
+func TestIngestStacktraceAfterSessionEndStillRecorded(t *testing.T) {
 	srv, st := newTestServer(t)
 
 	resp := doJSON(t, srv, http.MethodPost, "/session/start", testToken,

@@ -20,6 +20,23 @@ import (
 	"strings"
 )
 
+// Fingerprint tuning constants. Centralised here so a future change to
+// either value (e.g. wider hash window for low-collision multi-tenant
+// dedup, or more top frames for noisier languages) is a single edit
+// instead of grep-and-replace.
+const (
+	// fingerprintTopFrames is the number of leading non-header lines that
+	// feed into the fingerprint hash. Three is enough to distinguish
+	// different crash sites while staying robust against churn in deeper
+	// helper frames.
+	fingerprintTopFrames = 3
+	// fingerprintHexLen is the length (in hex characters) of the
+	// SHA-256-derived fingerprint after truncation. 16 hex chars = 64 bits
+	// of entropy, more than enough to make session-scoped collisions
+	// astronomically unlikely while keeping the column compact.
+	fingerprintHexLen = 16
+)
+
 // Language is the detected source language of a stacktrace. Empty when
 // Detect returned matched=false.
 type Language string
@@ -189,6 +206,22 @@ var (
 //	(b) literal `stack backtrace:` line + at least one numbered frame, OR
 //	(c) >=2 frame-pairs (numbered frame directly followed by an `at`-line)
 //	    — covers header-less backtraces dumped on their own.
+//
+// Known gap (qs-20260510-003 M6): the default Rust runtime panic without
+// `RUST_BACKTRACE=1` does NOT match. Shape:
+//
+//	thread 'X' panicked at src/foo.rs:N:C:
+//	<payload>
+//	note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+//
+// The first line carries the header AND the file:line, but neither an
+// indented `at <file>.rs:N` follow-up nor a numbered frame is present, so
+// (a)/(b)/(c) all reject. Adding a header+`note:` fallback would
+// re-introduce the false-positive class K1 (header-only chatty logs)
+// unless we additionally require the `note:` line — that's a heuristic
+// decision deferred to a future iteration. A skipped probe test in
+// detect_test.go pins this gap; flip its skip-guard when the heuristic
+// is added.
 func isRust(msg string) bool {
 	hasHeader := reRustHeader.MatchString(msg)
 	hasBacktrace := reRustBacktrace.MatchString(msg)
@@ -267,23 +300,24 @@ func normalizePython(msg string) string {
 
 // --- Fingerprint -------------------------------------------------------
 
-// Fingerprint computes a stable 16-char hex digest over the top frames
-// of the normalized stacktrace. We pick the first three non-empty
+// Fingerprint computes a stable hex digest over the top frames of the
+// normalized stacktrace. We pick the first fingerprintTopFrames non-empty
 // "interesting" lines (frames, not headers / empty / `---`) so the
 // fingerprint is robust against changes in the outer exception message
 // (e.g. "NullPointerException: foo" vs "NullPointerException: bar")
-// while still distinguishing different crash sites.
+// while still distinguishing different crash sites. The digest is
+// truncated to fingerprintHexLen hex characters.
 func Fingerprint(normalizedStack string) string {
 	if normalizedStack == "" {
 		return ""
 	}
-	frames := topFrames(normalizedStack, 3)
+	frames := topFrames(normalizedStack, fingerprintTopFrames)
 	if len(frames) == 0 {
 		// Fall back to whole message hash so we still dedup; should be rare.
 		frames = []string{strings.TrimSpace(normalizedStack)}
 	}
 	sum := sha256.Sum256([]byte(strings.Join(frames, "\n")))
-	return hex.EncodeToString(sum[:])[:16]
+	return hex.EncodeToString(sum[:])[:fingerprintHexLen]
 }
 
 // topFrames returns up to n trimmed lines that look like stack frames.

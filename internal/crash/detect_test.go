@@ -198,6 +198,31 @@ func TestDetectRustHeaderlessBacktraceStillMatches(t *testing.T) {
 	}
 }
 
+// TestDetectRustDefaultPanicWithoutBacktraceIsKnownGap is a probe test
+// for the qs-20260510-003 M6 finding: the default Rust runtime panic
+// emitted WITHOUT `RUST_BACKTRACE=1` (header + payload + `note: run with
+// RUST_BACKTRACE=1 ...`) is not matched today, because all three branches
+// of isRust require either an indented `at`-line or a numbered frame —
+// neither of which appears in this shape.
+//
+// The test is intentionally Skip'd: it documents the gap and the exact
+// payload to handle. When isRust grows a fourth branch (header + `note:`
+// fallback or similar), drop the t.Skip line and the assertion below
+// turns green automatically.
+func TestDetectRustDefaultPanicWithoutBacktraceIsKnownGap(t *testing.T) {
+	t.Skip("known gap (qs-20260510-003 M6): header + `note: RUST_BACKTRACE=1` shape not yet detected — see isRust doc-comment")
+	msg := "thread 'main' panicked at src/foo.rs:10:5:\n" +
+		"noops\n" +
+		"note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+	r := Detect("app", "ERROR", msg, nil)
+	if !r.Matched {
+		t.Fatalf("default Rust panic should match once the heuristic is added, got Matched=false")
+	}
+	if r.Language != LangRust {
+		t.Errorf("language = %q, want %q", r.Language, LangRust)
+	}
+}
+
 // TestDetectRustBacktraceMarkerStillMatches confirms branch (b): a
 // `stack backtrace:` literal line plus at least one numbered frame still
 // triggers a Rust match even when the panic-header has been stripped by
