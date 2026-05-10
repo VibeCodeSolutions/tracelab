@@ -251,6 +251,14 @@ func TestBridge_LineFlow_AllLevels(t *testing.T) {
 		t.Fatalf("want 6 persisted events (S dropped), got %d", len(got))
 	}
 	wantLevels := []string{"debug", "debug", "info", "warn", "error", "error"}
+	wantMsgs := []string{
+		"T: verbose",
+		"T: debug",
+		"T: info",
+		"T: warn",
+		"T: error",
+		"T: fatal",
+	}
 	for i, e := range got {
 		if e.Level != wantLevels[i] {
 			t.Errorf("event[%d] level=%q want %q", i, e.Level, wantLevels[i])
@@ -258,8 +266,8 @@ func TestBridge_LineFlow_AllLevels(t *testing.T) {
 		if e.Source != "adb" {
 			t.Errorf("event[%d] source=%q want adb", i, e.Source)
 		}
-		if e.Msg != "T: "+got[i].Msg[len("T: "):] || len(e.Msg) < 3 {
-			t.Errorf("event[%d] msg=%q (expected Tag: Message)", i, e.Msg)
+		if e.Msg != wantMsgs[i] {
+			t.Errorf("event[%d] msg=%q want %q", i, e.Msg, wantMsgs[i])
 		}
 		var meta map[string]any
 		if err := json.Unmarshal(e.Meta, &meta); err != nil {

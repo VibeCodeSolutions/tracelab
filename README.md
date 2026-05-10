@@ -91,9 +91,18 @@ Event timestamps (`ts`) are optional unix-nanoseconds; the hub fills in
 
 The hub can spawn a background goroutine that runs `adb logcat -v threadtime`
 against an Android device and ingests every line as an event with
-`source="adb"`. Persistence and `/tail` fan-out work exactly like a normal
-`/ingest` POST, so live consumers see adb output without any extra
-plumbing.
+`source="adb"`.
+
+Unlike `/ingest` — which persists to SQLite first and then publishes to
+`/tail` — the adb bridge inverts the order: every line is published to
+`/tail` subscribers synchronously (sub-millisecond fan-out, no batching),
+while DB writes are batched (whichever comes first: ~50 lines or ~50ms).
+This is deliberate. WebSocket fan-out and SQLite persistence are treated
+as two independent audit channels: the live stream is preserved even if a
+later DB write fails, so forensic consumers attached to `/tail` see the
+full sequence regardless of storage hiccups. Trade-off: the DB may lag
+the live stream by up to one batch interval — fine for post-mortem
+review, intentional for live tailing.
 
 Each reconnect (subprocess EOF, device unplug, daemon bounce) opens a
 **new session** so disconnect gaps are visible in the forensic trail

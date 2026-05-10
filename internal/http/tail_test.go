@@ -43,6 +43,21 @@ func newTestServerWithHub(t *testing.T) (*httptest.Server, *store.Store, *ws.Hub
 	return srv, st, hub
 }
 
+// waitForSubs polls hub.SubscriberCount() until it matches want or the
+// timeout expires. Mirrors the helper in internal/ws/handler_test.go and
+// removes the need for fixed time.Sleep gaps after dialTail.
+func waitForSubs(t *testing.T, h *ws.Hub, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if h.SubscriberCount() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("subscriber count = %d, want %d (timeout)", h.SubscriberCount(), want)
+}
+
 // dialTail builds a /tail websocket URL with the given query and Bearer
 // token (empty token = no Authorization header).
 func dialTail(t *testing.T, srv *httptest.Server, query, token string) (*websocket.Conn, *http.Response, error) {
@@ -86,7 +101,7 @@ func TestTail_AuthReject(t *testing.T) {
 }
 
 func TestTail_IngestFanOut(t *testing.T) {
-	srv, _, _ := newTestServerWithHub(t)
+	srv, _, hub := newTestServerWithHub(t)
 
 	// Open two /tail clients, one filtered, one unfiltered.
 	cAll, _, err := dialTail(t, srv, "", testToken)
@@ -112,8 +127,10 @@ func TestTail_IngestFanOut(t *testing.T) {
 	}
 	defer cFilter.Close()
 
-	// Allow both subscriptions to register.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until both subscriptions are registered on the hub. Polling the
+	// authoritative state instead of sleeping a fixed 50ms keeps CI green
+	// when the read pumps register a few ms later than usual.
+	waitForSubs(t, hub, 2, 2*time.Second)
 
 	// Ingest a 3-event batch.
 	events := []map[string]any{
@@ -163,8 +180,8 @@ func TestTail_ServerShutdownClosesClients(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Allow subscription to register.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the subscription is registered before triggering shutdown.
+	waitForSubs(t, hub, 1, 2*time.Second)
 
 	// Simulate server shutdown via hub.Close — this is what cmd/hub does
 	// before srv.Shutdown.
