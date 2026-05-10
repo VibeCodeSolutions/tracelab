@@ -1,9 +1,9 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-1-tail-sprint
+status: phase-1-tail-freigegeben
 last-updated: 2026-05-10
-qs-letzter-lauf: qs-20260510-005
+qs-letzter-lauf: qs-20260510-006
 phase-1-merge-commit: cee7a5d
 aktiver-auftrag: "#009"
 ---
@@ -41,6 +41,19 @@ aktiver-auftrag: "#009"
 - **Auto-Continuation-Modus (5a Default):** feature-branch, Commit pro Paket, Lead-Autonomie für Standard-git-Ops und Recovery-Patterns, kein FF-Merge ohne Admin-Confirm.
 - **Auto-Stop-Trigger zusätzlich:** M11 (Architektur-Verzweigung), jede Blocker-Finding aus Zwischen-Check.
 - **Status:** offen — bei belanna
+- **Verlauf:**
+  - 2026-05-10T (Eröffnung) — Branch `chore/phase-1-tail` von `main`@a5d1a10 angelegt, WORKLOG-Open committet (`72ba335`)
+  - 2026-05-10T (P1 done) — M1 README + M8 adb-Doc — Lead-Direktarbeit, commit `dbb9040`, `go vet ./...` grün
+  - 2026-05-10T (P2 start) — ADB-Polish (M7/M9/M10) an ballard via Subagent
+  - 2026-05-10T (P2 done) — ballard liefert: M7 multi-word-state Parser + M9 SetBinary→export_test.go + M10 goleak. Commit `5ba6a6e`, `go test -race ./...` repo-weit grün, goleak ohne Leak-Report.
+  - 2026-05-10T (P3 start) — Crash/Store (M3/M4/M5/M6) an ballard via Subagent
+  - 2026-05-10T (P3 done) — ballard liefert: M3 Konstanten + M4 Migration 0002 unique-index + M5 Test-Rename (Variante a, gegen Interface-Extraktion: 7-Methoden-Surface zu groß) + M6 Skip-Probe (Variante d, gegen Heuristik-Erweiterung: würde K1 re-öffnen). Commit `5c0ce33`, `go test -race ./...` repo-weit grün. M5/M6-Follow-ups als Bookmarks dokumentiert.
+  - 2026-05-10T (P4 Auto-Stop) — M11 Architektur-Entscheidung wartet auf Admin (Publish/Insert-Reihenfolge bridge.go ↔ handlers.go ↔ README)
+  - 2026-05-10T (M11 Admin-Entscheidung) — Variante (b): README präzisieren, Code bleibt. Forensik-Vorteil zwei unabhängiger Audit-Kanäle ist gewollt.
+  - 2026-05-10T (P4 done) — ballard liefert: M2 waitForSubs-Helper (beide Sleep-Stellen ersetzt) + M11 README-Section ADB Bridge neu formuliert (alte „exactly like /ingest"-Behauptung weg) + M12 wantMsgs-Soll-Array, kein Tautologie-Vergleich. Commit `2f65e50`, `go test -race ./...` grün, kein Mapping-Auffälligkeit.
+  - 2026-05-10T (QS-Sammelgate) — tuvok release-qs an gesamtem Tail-Sprint via Subagent
+  - 2026-05-10T (QS-Bericht) — qs-20260510-006: alle 12 Items grün, freigabe/none, Pattern-Wahlen 1:1 mit dokumentierten Begründungen, M11 Code-Diff = 0 Zeilen, repo-weit `go test -race ./...` grün
+  - 2026-05-10T (Findings-Gate) — chakotay: **Freigabe**. Strategie/Proportion sauber (12 Items / 4 Pakete proportional, M11-Auto-Stop diszipliniert, Pattern-Begründungen tragend, keine Geschmacksfindings). Sprint #009 ist QS-grün und FF-merge-ready zu `main`.
 
 ---
 
