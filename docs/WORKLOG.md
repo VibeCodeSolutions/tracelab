@@ -1,15 +1,18 @@
 ---
 type: worklog
 projekt: tracelab
-status: aktiv
+status: phase-1-merged
 last-updated: 2026-05-10
 qs-letzter-lauf: qs-20260510-005
+phase-1-merge-commit: cee7a5d
 ---
 
 # WORKLOG — VibeCoding — Tracelab
 
 > Auftragslogbuch für das Projekt **Tracelab** (Cross-Platform Test-Log-Hub, Go-Stack).
 > **2026-05-10 Migration:** WORKLOG ist ab jetzt im Repo unter `docs/WORKLOG.md`. Vorgänger-Datei lag unter `~/.claude/projects/-home-kaik-Projekte-tracelab/worklogs/vc.md` (Project-Memory) und ist als Read-only-Archiv mit Migrations-Hinweis dort verblieben.
+>
+> **2026-05-10 PHASE 1 GEMERGED:** `feat/phase-1-mvp-hub` per `--ff-only` nach `main` gemerged (Merge-Commit `cee7a5d`), Branch lokal+remote gelöscht. MVP-Hub ist live auf `main`. Phase 2 (CLI / MCP / Dashboard) noch nicht definiert. Backlog M1-M12 wartet auf Tail-Sprint oder thematischen Touch.
 
 ## Offener Backlog (konsolidiert M1–M12)
 
@@ -187,7 +190,7 @@ Aus den QS-Läufen qs-20260510-001 bis -005. Alle Minor, kein Re-Lauf nötig —
 - **Auftrag:** MVP-Hub bauen — Go-Daemon mit `POST /ingest`, `WS /tail`, `POST /session/start|end`, SQLite-Store auf `/run/media/kaik/AE62672C6266F88B/tracelab/`. Session-Marker-Schema. Konfig via `tracelab.toml`.
 - **Vorausgesetzt:** Skill `lyndsay-ballard` (Go-Backend-Lead) durch Harry erstellt — Auftrag liegt parallel.
 - **Erwarteter Output:** Lauffähiger Hub-Daemon, HTTP/WS-Endpoints, SQLite-Schema sessions+events. E2E-Verification: Test-Session starten, Event posten, via WS empfangen.
-- **Status:** vorbereitet → durch S1-S7 ausgeführt
+- **Status:** erledigt — Phase 1 gemerged
 - **Verlauf:**
   - `2026-05-07` — Auftrag eröffnet, Skill-Schöpfung Lyndsay Ballard parallel angestoßen.
   - `2026-05-07` — Skill `ballard` erstellt. Persona-Notiz unter `XBrain/50_Personen/Ballard.md`.
@@ -195,6 +198,7 @@ Aus den QS-Läufen qs-20260510-001 bis -005. Alle Minor, kein Re-Lauf nötig —
   - `2026-05-09` — S1-S3 in voriger Session abgearbeitet (Skeleton, Store, HTTP-Layer).
   - `2026-05-10` — S4 (WS /tail), S5 (Crash-Detect) inkl. Korrektur, S6 (ADB-Library) abgearbeitet. Phase-1-Restscope komplett.
   - `2026-05-10` — Admin-Erweiterung: S7 (ADB Daemon-Wireup) wird vor Merge nachgezogen, kein Phase-1.5.
+  - `2026-05-10` — S7 done, alle QS-Läufe grün (qs-001..005), 12 Minor im Backlog. **FF-Merge nach `main` (Merge-Commit `cee7a5d`), Branch `feat/phase-1-mvp-hub` lokal+remote gelöscht.** MVP-Hub ist live. AUFTRAG #001 erledigt.
 
 ---
 
