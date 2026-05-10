@@ -17,3 +17,13 @@ datastore_path = "/run/media/kaik/AE62672C6266F88B/tracelab"
 #   openssl rand -hex 32
 # The hub refuses to start while this is empty or the literal "CHANGEME".
 token = "CHANGEME"
+
+# Optional ADB-logcat bridge. When enabled, the hub spawns a background
+# goroutine that runs `adb logcat -v threadtime` and ingests each line as
+# an event with source="adb". The bridge reconnects with exponential
+# backoff on subprocess exit; each reconnect opens a NEW session so
+# disconnect gaps stay visible in the forensic trail.
+[adb]
+enabled       = false       # set to true once `adb devices` shows your target
+device_serial = ""          # leave empty to use the only attached device
+tag_filter    = ""          # optional single-tag filter, e.g. "MyApp"

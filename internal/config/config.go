@@ -18,6 +18,7 @@ type Config struct {
 	Server  ServerConfig  `toml:"server"`
 	Storage StorageConfig `toml:"storage"`
 	Auth    AuthConfig    `toml:"auth"`
+	ADB     ADBConfig     `toml:"adb"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -36,6 +37,27 @@ type StorageConfig struct {
 // AuthConfig holds the shared bearer token.
 type AuthConfig struct {
 	Token string `toml:"token"`
+}
+
+// ADBConfig configures the optional adb-logcat bridge.
+//
+// When Enabled is true the hub spawns a background bridge goroutine that
+// runs `adb logcat -v threadtime` against DeviceSerial (or the only
+// attached device when DeviceSerial is empty), maps each line into a
+// store.Event with source="adb" and persists+broadcasts it. The bridge
+// reconnects with exponential backoff on subprocess exit.
+type ADBConfig struct {
+	// Enabled toggles the bridge on/off. Default false: tracelab-hub
+	// works without any adb installed when this is left disabled.
+	Enabled bool `toml:"enabled"`
+	// DeviceSerial pins the bridge to a specific adb device (e.g.
+	// "emulator-5554", "192.168.1.42:5555"). Empty means "let adb
+	// pick the only attached device" — adb errors on >1 device when
+	// no -s is given, which the bridge surfaces as a reconnect.
+	DeviceSerial string `toml:"device_serial"`
+	// TagFilter restricts logcat to one tag (passed as `<tag>:V *:S`
+	// to the adb subprocess). Empty means stream every tag.
+	TagFilter string `toml:"tag_filter"`
 }
 
 // Load reads the TOML config at path and applies defaults.
