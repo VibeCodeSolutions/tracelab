@@ -1,10 +1,11 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-1-merged
+status: phase-1-tail-sprint
 last-updated: 2026-05-10
 qs-letzter-lauf: qs-20260510-005
 phase-1-merge-commit: cee7a5d
+aktiver-auftrag: "#009"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -13,6 +14,35 @@ phase-1-merge-commit: cee7a5d
 > **2026-05-10 Migration:** WORKLOG ist ab jetzt im Repo unter `docs/WORKLOG.md`. Vorgänger-Datei lag unter `~/.claude/projects/-home-kaik-Projekte-tracelab/worklogs/vc.md` (Project-Memory) und ist als Read-only-Archiv mit Migrations-Hinweis dort verblieben.
 >
 > **2026-05-10 PHASE 1 GEMERGED:** `feat/phase-1-mvp-hub` per `--ff-only` nach `main` gemerged (Merge-Commit `cee7a5d`), Branch lokal+remote gelöscht. MVP-Hub ist live auf `main`. Phase 2 (CLI / MCP / Dashboard) noch nicht definiert. Backlog M1-M12 wartet auf Tail-Sprint oder thematischen Touch.
+>
+> **2026-05-10 TAIL-SPRINT ERÖFFNET (AUFTRAG #009):** Phase-1-Tail räumt M1–M12 in vier thematischen Paketen ab (P1 Doku, P2 ADB-Polish, P3 Crash/Store, P4 Test+Konsistenz). Branch `chore/phase-1-tail`, Commit pro Paket, QS-Sammelgate am Ende. Auto-Stop erwartet bei M11 (Architektur-Entscheidung Publish/Insert-Reihenfolge).
+
+---
+
+## AUFTRAG #009 — Tracelab Phase-1-Tail M1–M12
+
+- **Timestamp:** 2026-05-10T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** Phase-1-Tail-Sprint — alle 12 Minor-Backlog-Items (M1–M12) aus den QS-Läufen qs-20260510-001 bis -005 abräumen. Details pro Item siehe Backlog-Tabelle oben in dieser Datei.
+  - **Branch:** `chore/phase-1-tail` von `main` (commit `a5d1a10`)
+  - **Paketierung** (sequenziell, Commit pro Paket):
+    - **P1 Doku** — M1 (README-Endpoints-Tabelle: `/tail` + Bearer-Header), M8 (adb-Cross-Platform-Doc präzisieren oder Windows-Cancel implementieren — Doku-Variante bevorzugt für Tail)
+    - **P2 ADB-Polish** — M7 (`no permissions` Parser-Fix), M9 (`SetBinary` aus Public-API raus, `internal_test.go` oder build-tag), M10 (`goleak` für LogcatStream-Tests)
+    - **P3 Crash/Store** — M3 (Magic-Numbers extrahieren), M4 (Migration 0002 UNIQUE INDEX als Defense-in-Depth), M5 (Test-Theater umbenennen/Store-Mock), M6 (Default-Rust-Panic Coverage-Lücke: entweder Branch d ergänzen oder als bekannte Lücke `t.Skip`-Probe)
+    - **P4 Test+Konsistenz** — M2 (`time.Sleep(50ms)` → `waitForSubs`-Helper), **M11 (Architektur-Entscheidung, Auto-Stop)**, M12 (`wantMsgs`-Soll-Array)
+  - **M11 — Auto-Stop:** Publish/Insert-Reihenfolge zwischen `internal/adb/bridge.go:299-300` und `internal/http/handlers.go:159+165`. Belanna legt die zwei Wege vor (a: Reihenfolge angleichen, Latenz steigt | b: README präzisieren, „Live-Stream konsistent zum Subprocess, DB kann zurückfallen") — Admin entscheidet, dann M11 ausführen.
+- **DoD:**
+  - alle M1–M12 erledigt oder explizit als „bekannte Lücke" dokumentiert (M6, M8 ggf.)
+  - `go test -race ./...` grün auf dem Tail-Branch
+  - QS-Sammelgate durch tuvok (release-qs) am Ende
+  - keine neuen Findings ohne Eintrag in vorgemerkter Backlog-Tabelle
+- **Auto-Continuation-Modus (5a Default):** feature-branch, Commit pro Paket, Lead-Autonomie für Standard-git-Ops und Recovery-Patterns, kein FF-Merge ohne Admin-Confirm.
+- **Auto-Stop-Trigger zusätzlich:** M11 (Architektur-Verzweigung), jede Blocker-Finding aus Zwischen-Check.
+- **Status:** offen — bei belanna
+
+---
 
 ## Offener Backlog (konsolidiert M1–M12)
 
