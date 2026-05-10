@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VibeCodeSolutions/tracelab/internal/adb"
 	"github.com/VibeCodeSolutions/tracelab/internal/config"
 	httplayer "github.com/VibeCodeSolutions/tracelab/internal/http"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
@@ -99,6 +100,42 @@ func run() error {
 	)
 	logger.Info("http server listening", slog.String("addr", addr))
 
+	// Optional adb-logcat bridge. Owned by main: started here under a
+	// child context derived from ctx so we can stop the bridge *before*
+	// hub.Close (otherwise its trailing Publish call would race the
+	// hub teardown). bridgeDone is closed when Run returns.
+	var (
+		bridgeCancel context.CancelFunc
+		bridgeDone   chan struct{}
+	)
+	if cfg.ADB.Enabled {
+		br := adb.NewBridge(adb.BridgeConfig{
+			DeviceSerial: cfg.ADB.DeviceSerial,
+			TagFilter:    cfg.ADB.TagFilter,
+			Store:        st,
+			Hub:          hub,
+			Logger:       logger,
+		})
+		var bridgeCtx context.Context
+		bridgeCtx, bridgeCancel = context.WithCancel(ctx)
+		// Safety net: even if a later return-path skips the explicit
+		// shutdown sequence below, the deferred cancel guarantees the
+		// bridge goroutine terminates. The explicit cancel+wait below
+		// is what actually orders the slog messages on the happy path.
+		defer bridgeCancel()
+		bridgeDone = make(chan struct{})
+		logger.Info("adb bridge enabled",
+			slog.String("device_serial", cfg.ADB.DeviceSerial),
+			slog.String("tag_filter", cfg.ADB.TagFilter),
+		)
+		go func() {
+			defer close(bridgeDone)
+			if err := br.Run(bridgeCtx); err != nil {
+				logger.Error("adb bridge exited", slog.Any("error", err))
+			}
+		}()
+	}
+
 	serveErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, stdhttp.ErrServerClosed) {
@@ -116,15 +153,27 @@ func run() error {
 		}
 	}
 
-	// Close the WS hub before srv.Shutdown so /tail handlers send their
-	// close frames and release the hijacked conns; otherwise srv.Shutdown
-	// would wait for them until shutdownCtx expires.
+	// Shutdown ordering matters and is observable in slog:
+	//   1. adb bridge stopping (publishes drained, session ended)
+	//   2. websocket hub closed (subscribers released, close-frames sent)
+	//   3. http server stopped (graceful srv.Shutdown returns)
+	// Reversed orders would either lose late events (hub.Close before
+	// bridge stops races a Publish) or stall srv.Shutdown waiting on
+	// hijacked /tail conns (srv.Shutdown before hub.Close).
+	if bridgeCancel != nil {
+		bridgeCancel()
+		<-bridgeDone
+		logger.Info("adb bridge stopped")
+	}
+
 	hub.Close()
+	logger.Info("websocket hub closed")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http shutdown failed", slog.Any("error", err))
 	}
+	logger.Info("http server stopped")
 	return nil
 }
