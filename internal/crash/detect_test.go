@@ -141,6 +141,80 @@ func TestDetectSingleAtLineIsNotJava(t *testing.T) {
 	}
 }
 
+// --- Rust false-positive guards (regression for qs-20260510-002 K1/K2) -----
+
+// TestDetectRustHeaderWithoutFramesIsNotRust covers the K1 finding: a bare
+// `thread '...' panicked at <free text>` line that appears in chatty
+// production logs (no follow-up `at <file>.rs:N` line, no `stack backtrace:`
+// literal) must NOT match. Sub-cases are real substrings observed in
+// Prod-style logs during QS qs-20260510-002.
+func TestDetectRustHeaderWithoutFramesIsNotRust(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+	}{
+		{"tokio_request_log", `thread 'tokio-worker-3' panicked at handling request (status=500)`},
+		{"plain_idiom", `thread 'worker' panicked at the disco`},
+		{"single_line_with_rs_ref", `thread 'main' panicked at runtime/init.rs:1`},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			r := Detect("app", "ERROR", tc.msg, nil)
+			if r.Matched {
+				t.Errorf("Rust header-only line misclassified as %q stack:\n%s", r.Language, r.NormalizedStack)
+			}
+		})
+	}
+}
+
+// TestDetectRustGenericNumberedListIsNotRust covers the K2 finding: a
+// header-less numbered list with a stray `.rs:N` reference (e.g. inside
+// a CHANGELOG or doc listing) must NOT match. The Rust detector now
+// requires the `at`-line to be bound to a numbered frame (frame-pair
+// chain) when no panic-header / `stack backtrace:` literal is present.
+func TestDetectRustGenericNumberedListIsNotRust(t *testing.T) {
+	msg := "1: docs\n2: rel\nat maintainers.rs:1"
+	r := Detect("app", "INFO", msg, nil)
+	if r.Matched {
+		t.Errorf("generic numbered list misclassified as %q stack:\n%s", r.Language, r.NormalizedStack)
+	}
+}
+
+// TestDetectRustHeaderlessBacktraceStillMatches confirms the legitimate
+// header-less case (RUST_BACKTRACE=1 output dumped on its own) still
+// matches via the frame-pair-chain branch.
+func TestDetectRustHeaderlessBacktraceStillMatches(t *testing.T) {
+	msg := `   0: foo::bar
+             at src/foo.rs:10:5
+   1: foo::main
+             at src/main.rs:5:13`
+	r := Detect("app", "ERROR", msg, nil)
+	if !r.Matched {
+		t.Fatalf("header-less Rust backtrace with frame pairs should match, got Matched=false")
+	}
+	if r.Language != LangRust {
+		t.Errorf("language = %q, want %q", r.Language, LangRust)
+	}
+}
+
+// TestDetectRustBacktraceMarkerStillMatches confirms branch (b): a
+// `stack backtrace:` literal line plus at least one numbered frame still
+// triggers a Rust match even when the panic-header has been stripped by
+// upstream log shipping.
+func TestDetectRustBacktraceMarkerStillMatches(t *testing.T) {
+	msg := `stack backtrace:
+   0: rust_panic
+   1: foo::do_thing`
+	r := Detect("app", "ERROR", msg, nil)
+	if !r.Matched {
+		t.Fatalf("stack-backtrace marker + numbered frame should match, got Matched=false")
+	}
+	if r.Language != LangRust {
+		t.Errorf("language = %q, want %q", r.Language, LangRust)
+	}
+}
+
 // --- Fingerprint behaviour -------------------------------------------------
 
 func TestFingerprintStability(t *testing.T) {

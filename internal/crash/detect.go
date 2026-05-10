@@ -171,19 +171,67 @@ func normalizeGo(msg string) string {
 //	thread 'main' panicked at src/foo.rs:10:5:
 //	oops
 var (
-	reRustHeader = regexp.MustCompile(`thread '[^']+' panicked at`)
-	reRustFrame  = regexp.MustCompile(`(?m)^\s*\d+:\s+\S`)
-	reRustAtLine = regexp.MustCompile(`(?m)^\s*at\s+\S+\.rs:\d+(:\d+)?`)
-	reRustLineNo = regexp.MustCompile(`\.rs:\d+(:\d+)?`)
+	reRustHeader    = regexp.MustCompile(`thread '[^']+' panicked at`)
+	reRustFrame     = regexp.MustCompile(`(?m)^\s*\d+:\s+\S`)
+	reRustAtLine    = regexp.MustCompile(`(?m)^\s*at\s+\S+\.rs:\d+(:\d+)?`)
+	reRustBacktrace = regexp.MustCompile(`(?m)^\s*stack backtrace:\s*$`)
+	reRustLineNo    = regexp.MustCompile(`\.rs:\d+(:\d+)?`)
 )
 
+// isRust matches a Rust stacktrace using one of three independent signals.
+//
+// The plain panic-header alone is NOT sufficient: production logs contain
+// chatty lines like `thread 'tokio-worker-3' panicked at handling request
+// (status=500)` which superficially match the header but have no stack at
+// all. Symmetry with Java/Python (header + at-least-one-frame) is enforced.
+//
+//	(a) panic header + at least one `at <file>.rs:N` follow-up line, OR
+//	(b) literal `stack backtrace:` line + at least one numbered frame, OR
+//	(c) >=2 frame-pairs (numbered frame directly followed by an `at`-line)
+//	    — covers header-less backtraces dumped on their own.
 func isRust(msg string) bool {
-	if reRustHeader.MatchString(msg) {
+	hasHeader := reRustHeader.MatchString(msg)
+	hasBacktrace := reRustBacktrace.MatchString(msg)
+	hasAt := reRustAtLine.MatchString(msg)
+	hasFrame := reRustFrame.MatchString(msg)
+
+	// (a) header + at least one `at <file>.rs:N` line
+	if hasHeader && hasAt {
 		return true
 	}
-	// Header-less backtraces (when RUST_BACKTRACE=1 is dumped on its own):
-	// need both numbered frames AND `at <file>.rs:N` lines.
-	return reRustFrame.MatchString(msg) && reRustAtLine.MatchString(msg)
+	// (b) `stack backtrace:` literal + at least one numbered frame
+	if hasBacktrace && hasFrame {
+		return true
+	}
+	// (c) >=2 frame-pairs: numbered frame line directly followed by an
+	// `at <file>.rs:N` line. Walking line-by-line is cheap and rejects
+	// generic numbered lists like `1: docs / 2: rel / at maintainers.rs:1`
+	// where the `at`-line is not bound to a frame.
+	return countRustFramePairs(msg) >= 2
+}
+
+// countRustFramePairs counts consecutive (numbered-frame, at-line) pairs.
+// "Consecutive" tolerates blank lines between the pair so we stay robust
+// against minor whitespace variation.
+func countRustFramePairs(msg string) int {
+	lines := strings.Split(msg, "\n")
+	pairs := 0
+	for i := 0; i < len(lines)-1; i++ {
+		if !reRustFrame.MatchString(lines[i]) {
+			continue
+		}
+		// Look ahead at the next non-blank line.
+		for j := i + 1; j < len(lines); j++ {
+			if strings.TrimSpace(lines[j]) == "" {
+				continue
+			}
+			if reRustAtLine.MatchString(lines[j]) {
+				pairs++
+			}
+			break
+		}
+	}
+	return pairs
 }
 
 func normalizeRust(msg string) string {
