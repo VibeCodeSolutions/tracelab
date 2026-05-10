@@ -81,6 +81,59 @@ Examples (assuming `TOKEN=$(cat .token)`):
 Event timestamps (`ts`) are optional unix-nanoseconds; the hub fills in
 `time.Now()` when omitted. `meta` is opaque JSON.
 
+## ADB Bridge (optional)
+
+The hub can spawn a background goroutine that runs `adb logcat -v threadtime`
+against an Android device and ingests every line as an event with
+`source="adb"`. Persistence and `/tail` fan-out work exactly like a normal
+`/ingest` POST, so live consumers see adb output without any extra
+plumbing.
+
+Each reconnect (subprocess EOF, device unplug, daemon bounce) opens a
+**new session** so disconnect gaps are visible in the forensic trail
+rather than hidden inside one long session. The bridge backs off
+between reconnect attempts (1s / 2s / 5s / 10s, then constant 10s).
+
+Configuration block in `tracelab.toml`:
+
+    [adb]
+    enabled       = true              # off by default
+    device_serial = "emulator-5554"   # empty = pick the only attached device
+    tag_filter    = ""                # empty = stream every tag (otherwise <tag>:V *:S)
+
+Logcat priorities map to event levels as:
+
+    V, D  →  debug
+    I     →  info
+    W     →  warn
+    E, F  →  error
+    S     →  ignored (it is a logcat filter directive, not a real level)
+
+`meta` carries `{pid, tid, timestamp (RFC3339), level_raw, device_serial}`.
+
+### Smoke
+
+    adb devices                        # confirm the device is attached
+    # set [adb].enabled = true and (optionally) device_serial in tracelab.toml
+    make run                           # or: ./dist/tracelab-hub
+
+The hub logs `"adb bridge enabled"` on start and `"adb bridge starting"`
+once a session is created. To watch the live stream, subscribe to
+`/tail`. The session id appears in slog (`session_id=...`); pass it
+to `/tail?session=<id>` to filter, or omit `?session=` to watch all
+sessions:
+
+    TOKEN=$(awk -F\" '/^token/{print $2}' tracelab.toml)
+    websocat -H "Authorization: Bearer $TOKEN" \
+        "ws://127.0.0.1:8765/tail"
+
+A new session id is logged after each reconnect — copy the latest one
+if you want to follow only the current adb stream.
+
+On shutdown, slog emits the stop-ordering markers in this order:
+
+    "adb bridge stopped" → "websocket hub closed" → "http server stopped"
+
 ## Building
 
 Requires Go 1.25+ (pulled in by `modernc.org/sqlite` ≥ 1.50; the toolchain
