@@ -22,6 +22,29 @@ aktiver-auftrag: "#010 Phase-2a CLI"
 
 ---
 
+## AUFTRAG #011 — Tracelab P2a-S1 — CLI Skeleton
+
+- **Timestamp:** 2026-05-13T (Eröffnung)
+- **Von:** belanna
+- **An:** ballard
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** S1 (Skeleton) von Phase 2a. `cmd/cli/main.go` mit cobra-Root, leeren Sub-Cmd-Stubs für `run`/`tail`/`sessions`/`adb`. Makefile-Target `cli` mit Cross-Compile-Sub-Targets (Linux + Windows, CGO-frei). Keine Logik in den Subkommandos — nur `--help`-Output und passende Short-/Long-Descriptions. `--version`-Flag identisch zur Hub-Version (LDFLAGS-Pattern aus Makefile übernehmen).
+  - **Repo/Branch:** `/home/kaik/Projekte/tracelab` · `feat/phase-2-cli`@94a05f7
+  - **ARCH-Ref:** `docs/ARCH.md` ADR-001/-002/-003 (Admin-grün 2026-05-13)
+- **DoD S1:**
+  - `tracelab --help` zeigt alle 4 Sub-Cmds (run/tail/sessions/adb) mit Kurzbeschreibung
+  - `tracelab --version` druckt Git-derived Version (gleiche Schiene wie Hub)
+  - `make cli` baut Linux-Binary nach `dist/tracelab`
+  - `make cli-windows` baut Windows-Binary nach `dist/tracelab.exe`, CGO-frei
+  - `go vet ./...` und `go test -race ./...` repo-weit grün
+  - Neue Deps: nur cobra-Familie (`spf13/cobra`); `go mod tidy` läuft sauber
+- **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit, Recovery max 2 Patterns.
+- **Status:** offen — bei ballard
+- **Verlauf:**
+  - 2026-05-13T (Eröffnung) — Auftrag an ballard via Worker-Subagent (Klasse `feature`)
+
+---
+
 ## AUFTRAG #010 — Tracelab Phase 2a — CLI
 
 - **Timestamp:** 2026-05-13T (Eröffnung)
