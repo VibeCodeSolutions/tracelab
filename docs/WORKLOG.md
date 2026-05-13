@@ -22,6 +22,39 @@ aktiver-auftrag: "#010 Phase-2a CLI"
 
 ---
 
+## AUFTRAG #012 — Tracelab P2a-S2 — Client Paket
+
+- **Timestamp:** 2026-05-13T (Eröffnung)
+- **Von:** belanna
+- **An:** ballard
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** S2 (Client-Paket) von Phase 2a. Neues Paket `internal/client/` mit Hub-HTTP-API-Surface (ohne WebSocket-Tail — der folgt in S4 zusammen mit dem `tail`-Sub-Cmd). Wird in S3+ vom CLI konsumiert, in 2b vom MCP-Server. Eigene DTOs (Mirror der Hub-Response-Shapes), kein Import aus `internal/store/`.
+  - **Repo/Branch:** `/home/kaik/Projekte/tracelab` · `feat/phase-2-cli`@d65115e
+  - **ARCH-Ref:** `docs/ARCH.md` ADR-003 (Admin-grün)
+- **Surface (Minimum für S2):**
+  - `Config{ BaseURL, Token string; Timeout time.Duration }`, `New(cfg Config) (*Client, error)`
+  - `(*Client).Health(ctx) error`
+  - `(*Client).StartSession(ctx context.Context, label string) (id string, err error)`
+  - `(*Client).EndSession(ctx, id string) error`
+  - `(*Client).Ingest(ctx, id string, events []Event) (accepted int, err error)`
+  - `(*Client).ListSessions(ctx, limit int) ([]Session, error)`
+  - DTOs: `Event{Source, Level, Msg string; Meta map[string]any; TS int64 (optional)}`, `Session{ID, Label string; StartedAt, EndedAt int64}` — Mirror der Hub-Schemas; Felder mit `omitempty` wo angemessen.
+- **DoD S2:**
+  - `internal/client/` mit obiger Surface, Bearer-Auth-Header gesetzt, Default-Timeout 10s
+  - Unit-Tests gegen `httptest.NewServer` — pro Endpoint mindestens 1 Happy-Path + 1 Error-Path (HTTP-Status ≠ 2xx → typisierter Fehler)
+  - Auth-Fehler: 401/403 → erkennbarer Error-Typ (`var ErrUnauthorized`)
+  - Context-Cancellation respektiert (ein Test mit cancellierter ctx)
+  - `go vet ./...` + `go test -race ./...` repo-weit grün
+  - Keine neuen Top-Level-Deps (nur stdlib + cobra/chi/gorilla — schon da)
+  - cmd/cli/ wird NICHT angefasst (S3 verdrahtet später)
+  - Phase-1-Code in cmd/hub/ + internal/{adb,crash,http,ingest,store,ws} unangetastet
+- **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops.
+- **Status:** offen — bei ballard
+- **Verlauf:**
+  - 2026-05-13T (Eröffnung) — Auftrag an ballard via Worker-Subagent (Klasse `feature`)
+
+---
+
 ## AUFTRAG #011 — Tracelab P2a-S1 — CLI Skeleton
 
 - **Timestamp:** 2026-05-13T (Eröffnung)
