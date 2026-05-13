@@ -114,12 +114,15 @@ aktiver-auftrag: "#010 Phase-2a CLI"
   - jedes Hub-Schema-Change (rückwirkt auf Phase-1-Code) → Admin-Confirm
   - Blocker-Findings aus Zwischen-QS
   - ARCH-Vorab-Entscheidung mit Tragweite jenseits CLI-Framework-Wahl (z.B. eigenes Daemon-Management-Konzept für `run`-Subkommando)
-- **Status:** offen — bei belanna (S1 Skeleton)
+- **Status:** offen — pausiert nach S2-Gate, S3 (sessions-Sub-Cmd) pending bei belanna
 - **Verlauf:**
   - 2026-05-13T (Eröffnung) — WORKLOG-Open + Plan-File-Status `phase-2a-laufend` + Sync-Commit
   - 2026-05-13T (Branch) — `feat/phase-2-cli` von `main`@db0370d angelegt
   - 2026-05-13T (ARCH-Vorab-Entwurf) — belanna: `docs/ARCH.md` angelegt mit ADR-001 (cobra), ADR-002 (shared toml + `[cli]`), ADR-003 (`internal/client/`). Sub-Sprint-Schnitt S1–S6 vorgeschlagen. **Auto-Stop:** ADR-004 (`adb`-Scope, hub-Endpoint vs. local) und ADR-005 (`run`-Semantik, drop/foreground/daemon) brauchen Admin-Entscheidung vor S5/S6. Empfehlungen liegen im File. S1–S4 sind nach ADR-001/-002/-003-Approval startklar.
   - 2026-05-13T (Admin-Approval) — Admin: ADR-001/-002/-003 akzeptiert, S1 (Skeleton) startklar. ADR-004 + ADR-005 bleiben pending bis vor S5/S6.
+  - 2026-05-13T (S1 done) — AUFTRAG #011 geschlossen, Findings-Gate `d65115e`.
+  - 2026-05-13T (S2 done) — AUFTRAG #012 geschlossen, Findings-Gate `872dee6`.
+  - 2026-05-13T (Admin-Pause) — Pause vor S3. Branch `feat/phase-2-cli`@`872dee6` bleibt stehen. Wiedereinstieg: S3 (`sessions`-Sub-Cmd) — erstes End-to-End des Clients, erstmals Config-Discovery aus `tracelab.toml [cli]`-Sektion (ARCH-002), Format-Output table/json.
 
 ---
 
