@@ -1,12 +1,12 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-1-tail-merged
-last-updated: 2026-05-11
+status: phase-2a-laufend
+last-updated: 2026-05-13
 qs-letzter-lauf: qs-20260510-006
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "—"
+aktiver-auftrag: "#010 Phase-2a CLI"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -17,10 +17,42 @@ aktiver-auftrag: "—"
 > **2026-05-10 PHASE 1 GEMERGED:** `feat/phase-1-mvp-hub` per `--ff-only` nach `main` gemerged (Merge-Commit `cee7a5d`), Branch lokal+remote gelöscht. MVP-Hub ist live auf `main`. Phase 2 (CLI / MCP / Dashboard) noch nicht definiert. Backlog M1-M12 wartet auf Tail-Sprint oder thematischen Touch.
 >
 > **2026-05-10 TAIL-SPRINT ERÖFFNET (AUFTRAG #009):** Phase-1-Tail räumt M1–M12 in vier thematischen Paketen ab (P1 Doku, P2 ADB-Polish, P3 Crash/Store, P4 Test+Konsistenz). Branch `chore/phase-1-tail`, Commit pro Paket, QS-Sammelgate am Ende. Auto-Stop erwartet bei M11 (Architektur-Entscheidung Publish/Insert-Reihenfolge).
+>
+> **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 
 ---
 
-## AUFTRAG #009 — Tracelab Phase-1-Tail M1–M12
+## AUFTRAG #010 — Tracelab Phase 2a — CLI
+
+- **Timestamp:** 2026-05-13T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** Phase 2a der Phase-2-Roadmap — `tracelab` CLI bauen. Subkommandos: `run` (Hub starten/managen), `tail` (Live-WS-Stream konsumieren mit optional `--session=<id>`), `sessions` (GET `/sessions` listen, lim/format-Optionen), `adb` (Devices listen, Logcat-Stream-Test via Hub-Bridge). Konsumiert Hub-HTTP+WS-API mit Bearer-Auth aus `tracelab.toml`.
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2-roadmap.md` (Block 1/2/3 ✅, Status `briefing-bereit`)
+  - **Branch:** `feat/phase-2-cli` von `main`@e4eb434
+  - **Sub-Sprint-Schnitt:** belanna entscheidet (analog Phase 1 — ARCH-Vorab erst, dann ggf. S1 Skeleton, S2 HTTP-Client, S3 WS-Tail-Subkommando, S4 Sessions-Subkommando, S5 ADB-Subkommando, S6 `run`-Subkommando). Final cut bleibt Lead.
+  - **ARCH-Vorab (`docs/ARCH.md` ergänzen, vor S1):**
+    - CLI-Framework: cobra-Default oder Alternative — belanna+ballard begründen
+    - Config-Sharing: `tracelab.toml` Sektion `[cli]` mit Server-URL+Token, oder separate `.tracelab-cli.toml` mit Default-Discovery — Entscheidung dokumentieren
+    - Shared HTTP-Client (Bearer-Auth, Retries) als neues `internal/client/` Paket
+- **DoD Phase 2a:**
+  - `cmd/cli/main.go` baut → `tracelab` Binary, cross-compiled für Linux+Windows ohne CGO
+  - Alle vier Subkommandos funktional gegen lokal laufenden Hub
+  - `go test -race ./...` repo-weit grün
+  - `docs/ARCH.md` enthält CLI-Sektion (Framework-Wahl, Config-Strategie, Client-Paket)
+  - README Endpoints-Tabelle um CLI-Konsumenten-Sicht ergänzt (kurz)
+  - tuvok release-qs Findings-Gate grün (keine Blocker, keine offenen Major)
+- **Auto-Continuation-Modus (5a-Default):** Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit, Recovery-Patterns max 2 Versuche, FF-Merge nach `main` NACH Phasen-Done und Admin-Confirm.
+- **Auto-Stop-Trigger zusätzlich:**
+  - jedes Hub-Schema-Change (rückwirkt auf Phase-1-Code) → Admin-Confirm
+  - Blocker-Findings aus Zwischen-QS
+  - ARCH-Vorab-Entscheidung mit Tragweite jenseits CLI-Framework-Wahl (z.B. eigenes Daemon-Management-Konzept für `run`-Subkommando)
+- **Status:** offen — bei belanna
+- **Verlauf:**
+  - 2026-05-13T (Eröffnung) — WORKLOG-Open + Plan-File-Status `phase-2a-laufend` + Sync-Commit
+
+---
 
 - **Timestamp:** 2026-05-10T (Eröffnung)
 - **Von:** chakotay
