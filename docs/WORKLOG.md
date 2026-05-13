@@ -49,9 +49,11 @@ aktiver-auftrag: "#010 Phase-2a CLI"
   - cmd/cli/ wird NICHT angefasst (S3 verdrahtet später)
   - Phase-1-Code in cmd/hub/ + internal/{adb,crash,http,ingest,store,ws} unangetastet
 - **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops.
-- **Status:** offen — bei ballard
+- **Status:** in QS — bei tuvok
 - **Verlauf:**
   - 2026-05-13T (Eröffnung) — Auftrag an ballard via Worker-Subagent (Klasse `feature`)
+  - 2026-05-13T (Worker-Return) — ballard: Commit `408465c` (11 Files, +1017). 6 Surface-Methoden + Tail-Placeholder. Sentinel-Errors (`ErrUnauthorized`/`ErrServerError`) + `HTTPError{Status,Endpoint,Body}` mit `Unwrap()`. Stdlib-only (kein neuer Dep). Wire-Types getrennt von Public-Types (`Event.Meta any` → intern `json.RawMessage`). `Session.EndedAt *int64` `omitempty` spiegelt Hub `sessionView`. `Health` ohne Auth, `New()` mit URL+Token+CHANGEME-Validation. `go vet` + `go test -race -count=1 ./...` repo-weit grün. cmd/cli/ + Phase-1-Pakete unangetastet.
+  - 2026-05-13T (QS-Trigger) — tuvok-Subagent (Klasse `standard`) für S2-QS
 
 ---
 
