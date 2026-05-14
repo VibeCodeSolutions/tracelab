@@ -111,7 +111,7 @@ No package moves in Phase 2a. Hub code stays untouched.
 | **S2 — Client package** | `internal/client/` HTTP endpoints (no `Tail` yet), unit-tests via `httptest` | foundations for S3+S4 |
 | **S3 — `sessions` sub-cmd** | list sessions with `--limit`, `--format=table|json` | first end-to-end use of S2 |
 | **S4 — `tail` sub-cmd** | WS-loop in client (`Tail`), CLI consumer with `--session=<id>`, color by level, SIGINT clean close | finishes the read-side |
-| **S5 — `adb` sub-cmd** | **open design — see ADR-004 below** | may trigger hub API change → Auto-Stop |
+| **S5 — `adb` sub-cmd** | hub-mediated (ADR-004 = Option B): new endpoints `GET /adb/devices`, `POST /adb/start`, `POST /adb/stop` + CLI thin client | Hub schema-change, decided 2026-05-14 |
 | **S6 — `run` sub-cmd** | **open design — see ADR-005 below** | daemon-management strategy → Auto-Stop |
 
 S1–S4 are well-defined and can proceed once ADR-001/-002/-003 are approved.
@@ -119,7 +119,7 @@ S5 and S6 each require an explicit decision before they enter implementation.
 
 ### Open ADRs — Auto-Stop before S5 / S6
 
-#### ADR-004 (OPEN): `tracelab adb` scope
+#### ADR-004: `tracelab adb` scope — Option B (Admin-decided 2026-05-14)
 
 The hub today has an internal ADB bridge (`internal/adb/` + bridge goroutine
 in the daemon). It is **not** exposed via HTTP — there is no `/adb/devices`
@@ -149,7 +149,12 @@ Phase 2b will want exactly these endpoints to let Claude Code drive ADB, and
 surface from day one. The API change is small and additive (no breakage of
 existing endpoints).
 
-**Decision pending:** Admin confirm before S5 starts.
+**Decision (2026-05-14):** **Option B.** Reason confirmed with Admin: the hub
+is the single sammelpunkt for all debug streams in the product vision —
+local ADB at the CLI would bypass the hub-recording for ADB sessions and
+break the „all debugs land at one point"-principle. Schema-Change at the
+Phase-1-merged hub is the explicit Auto-Stop cost; Admin grün given.
+S5 implements three new additive Hub-endpoints + CLI thin client.
 
 #### ADR-005 (OPEN): `tracelab run` semantics
 

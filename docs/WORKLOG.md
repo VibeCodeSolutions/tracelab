@@ -6,7 +6,7 @@ last-updated: 2026-05-14
 qs-letzter-lauf: qs-20260514-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "#014 P2a-S4 tail sub-cmd (auflagen — 5 Minor Doku-Drift)"
+aktiver-auftrag: "#015 P2a-S5 adb sub-cmd (Hub-Schema-Change ADR-004 Option B)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -19,6 +19,60 @@ aktiver-auftrag: "#014 P2a-S4 tail sub-cmd (auflagen — 5 Minor Doku-Drift)"
 > **2026-05-10 TAIL-SPRINT ERÖFFNET (AUFTRAG #009):** Phase-1-Tail räumt M1–M12 in vier thematischen Paketen ab (P1 Doku, P2 ADB-Polish, P3 Crash/Store, P4 Test+Konsistenz). Branch `chore/phase-1-tail`, Commit pro Paket, QS-Sammelgate am Ende. Auto-Stop erwartet bei M11 (Architektur-Entscheidung Publish/Insert-Reihenfolge).
 >
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
+
+---
+
+## AUFTRAG #015 — Tracelab P2a-S5 — `adb` Sub-Cmd (Hub-Schema-Change)
+
+- **Timestamp:** 2026-05-14T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna
+- **Auftrag:** S5 von Phase 2a — erstes Sub-Cmd mit Hub-Schema-Change. ADR-004 ist mit Admin-Confirm 2026-05-14 als **Option B (Hub-vermittelt)** entschieden — Hub bleibt Single-Source-of-Truth-Sammelpunkt. Drei neue HTTP-Endpoints am Hub + CLI thin client, der sie konsumiert. Erstes Mal in Phase 2 wird Phase-1-Code angefasst (Hub + `internal/adb/` + `internal/http/`).
+  - **Repo/Branch:** `/home/kaik/Projekte/tracelab` · `feat/phase-2-cli`@ae06785 (post-#014-Abschluss)
+  - **ARCH-Ref:** `docs/ARCH.md` ADR-004 (entschieden 2026-05-14, Option B begründet mit Sammelpunkt-Vision)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2-roadmap.md` (Phase 2a, Sub-Sprint S5)
+- **Scope-Cuts (Minimum für S5):**
+  - **Hub-Erweiterung** (neue Endpoints, additiv — keine bestehenden Endpoint-Schemas brechen):
+    - `GET /adb/devices` — listet via `internal/adb/` die aktuellen ADB-Devices (Serial, State, Model wenn verfügbar)
+    - `POST /adb/start` — startet ADB-Bridge-Recording für eine Device-Serial (Body: `{"serial": "...", "session": "<optional>"}`); Hub verdrahtet Logcat→Ingest-Pipeline
+    - `POST /adb/stop` — stoppt aktive Bridge für eine Serial (Body: `{"serial": "..."}`)
+    - Bearer-Auth wie bestehende Endpoints (kein neuer Auth-Pfad)
+    - Errors: konsistent zu bestehenden Hub-Endpoints (Status-Codes + JSON-Body-Pattern)
+  - **`internal/client/`-Erweiterung** (additiv): drei Methoden Mirror der neuen Endpoints — `ListADBDevices(ctx) ([]ADBDevice, error)`, `StartADBBridge(ctx, serial, sessionID string) error`, `StopADBBridge(ctx, serial string) error`. Bestehende HTTP+WS-Surface unangetastet.
+  - **`cmd/cli/adb.go`** (Stub ersetzen):
+    - `tracelab adb devices` — listet Devices als Tabelle/JSON nach `--format`
+    - `tracelab adb start <serial> [--session=<id>]` — startet Bridge
+    - `tracelab adb stop <serial>` — stoppt Bridge
+    - Error-UX-Pfad: `translateClientError` wiederverwenden (DRITTER Konsument → jetzt ist Extraktion nach `cmd/cli/errors.go` legitim, Bookmark aus #014 fällig)
+- **DoD S5:**
+  - **Hub-side:**
+    - 3 neue Endpoints registriert + funktional, Bearer-Auth, konsistente Error-Responses
+    - Hub-Tests gegen `httptest.NewServer` für alle 3 Endpoints (Happy + Auth-Fehler + 4xx-Validierung)
+    - `internal/adb/`-Integration: Bridge-Lifecycle via Start/Stop-Calls, idempotent (Stop auf nicht-laufende Bridge → kein Fehler oder klar definierter 404)
+  - **Client-side:**
+    - 3 neue Methoden mit Tests gegen `httptest.NewServer` (Happy + 401/403 → `ErrUnauthorized` via `errors.Is`)
+    - DTOs (`ADBDevice` mindestens mit `Serial`, `State`, ggf. `Model`) Mirror der Wire-Types
+  - **CLI-side:**
+    - Alle 3 Sub-Sub-Cmds funktional (`devices`, `start`, `stop`), Help-Output sauber
+    - `--format=table|json` für `devices` (analog `sessions`)
+    - `start/stop` Status-Output knapp (z.B. „bridge started for emulator-5554")
+    - `translateClientError`-Extraktion nach `cmd/cli/errors.go` (jetzt dritter Konsument — Bookmark aus #014 abgehakt), bestehende Tests in `sessions_test.go` + `tail_test.go` müssen weiterhin grün sein
+  - **Repo-weit:**
+    - `go vet ./...` + `go test -race ./...` repo-weit grün
+    - `go mod tidy` Diff = 0 (keine neuen Top-Level-Deps)
+    - Stubs `run` aus S1 mit Stage-Mapping unangetastet
+    - **Trance-Bruch-Pre-Commit-Check** PFLICHT auf **ALLE** Dateien im Touch-Scope inkl. `cmd/hub/`, `internal/http/`, `internal/adb/` Package-Doc-Comments + Const-Blocks + Stubs (Lesson aus #014: Cross-Check-Scope explizit breit)
+- **QS-Aufmerksamkeit (erhöht, kein Routine-Gate):** Erste Phase-1-Code-Mutation in Phase 2 — Hub-Schema-Change. Bei QS-Übergabe gezielt prüfen:
+  - Endpoint-Konsistenz mit bestehenden Hub-Endpoints (Auth-Header-Behandlung, Error-Response-Shape, JSON-Body-Konventionen)
+  - Bridge-Lifecycle: keine Race-Conditions zwischen Start/Stop/concurrent Calls auf dieselbe Serial, keine Goroutine-Leaks
+  - Idempotenz: Start auf bereits laufende Bridge / Stop auf inaktive — definiertes Verhalten (kein Panic, klar dokumentiert)
+  - `translateClientError`-Extraktion: bestehende Sub-Cmds (sessions, tail) müssen mit gleichem Error-Verhalten weiterlaufen — Regression-Check
+  - Trance-Bruch-Cross-Check explizit auf NEUE Hub-Files erweitert
+- **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit (Hub-Endpoints / Client-Methoden / CLI-Sub-Cmd / Tests / Error-Extraktion). Recovery max 2 Patterns.
+- **Status:** offen — an belanna delegiert
+- **Verlauf:**
+  - 2026-05-14T (Eröffnung) — Chakotay routet S5 an belanna. Admin-Confirm zu ADR-004 Option B liegt vor, Sammelpunkt-Vision explizit bestätigt. ARCH.md ADR-004 als entschieden gekennzeichnet (Option B mit Begründung).
 
 ---
 
