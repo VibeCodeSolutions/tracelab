@@ -17,10 +17,11 @@ import (
 	"github.com/VibeCodeSolutions/tracelab/internal/cliconfig"
 )
 
-// formatPlain renders one human-readable line per event with ANSI colour
-// applied to the level token; formatJSON renders one JSON object per
-// event (NDJSON), no indentation, one event per line — both keep the
-// stream `jq`-friendly.
+// formatPlain selects the human-readable per-line renderer with ANSI
+// colour on the level token. tailFormatTag is the fallback source-tag
+// printed for events whose Source field is empty (see Z.267-269 in
+// writeTailEvent). The JSON renderer (formatJSON) is declared in
+// sessions.go and shared across sub-cmds.
 const (
 	formatPlain   = "plain"
 	tailFormatTag = "tail"
@@ -124,8 +125,11 @@ func runTail(cmd *cobra.Command, flags tailFlags) error {
 	c, err := client.New(client.Config{
 		BaseURL: resolved.BaseURL,
 		Token:   resolved.Token,
-		// Timeout is the http.Client timeout, used only for the WS
-		// handshake — the long-lived stream itself is not subject to it.
+		// Timeout configures the embedded http.Client (used for the
+		// sessions HTTP path). The WS handshake here uses its own
+		// dialer-level HandshakeTimeout in internal/client/tail.go;
+		// this field is kept for parity with sessions.go and is
+		// effectively a no-op for the tail sub-command.
 		Timeout: 10 * time.Second,
 	})
 	if err != nil {
@@ -141,9 +145,11 @@ func runTail(cmd *cobra.Command, flags tailFlags) error {
 	// Channel buffer comes from [cli].tail_buffer. The WebSocket reader
 	// (inside client.Tail's onEvent callback) sends synchronously, so a
 	// slow stdout naturally back-pressures the reader — and the hub's
-	// own drop-on-full subscriber discipline takes over from there. No
-	// silent local drop in the CLI itself; events that arrive are
-	// printed in order.
+	// own drop-on-full subscriber discipline takes over from there.
+	// Events that arrive are printed in order under normal operation;
+	// the only exception is the in-flight event during context
+	// cancellation, which is dropped by the select-on-Done bail-out in
+	// the onEvent callback below (expected shutdown semantics).
 	bufSize := resolved.CLI.TailBuffer
 	if bufSize <= 0 {
 		bufSize = 1024 // mirror DefaultCLITailBuffer; ApplyDefaults already runs in Resolve

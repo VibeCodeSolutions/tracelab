@@ -1,9 +1,9 @@
 // Command tracelab is the Tracelab CLI.
 //
-// Phase 2a / Stage 3: the `sessions` sub-command is now wired end-to-end
+// Phase 2a / Stage 4: `sessions` and `tail` are now wired end-to-end
 // against the shared client (internal/client/) and the config-discovery
-// helper (internal/cliconfig/). `run`, `tail`, and `adb` remain stubs;
-// real behaviour lands in S4 (tail), S5 (adb), S6 (run).
+// helper (internal/cliconfig/). `run` and `adb` remain stubs; real
+// behaviour lands in S5 (adb) and S6 (run).
 package main
 
 import (
