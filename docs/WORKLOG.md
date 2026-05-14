@@ -3,10 +3,10 @@ type: worklog
 projekt: tracelab
 status: phase-2a-laufend
 last-updated: 2026-05-14
-qs-letzter-lauf: qs-20260513-002
+qs-letzter-lauf: qs-20260514-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd"
+aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd (auflagen — 2 Minor direkter Fix)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -57,12 +57,14 @@ aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd"
   - `internal/client/` ggf. minimal ergänzt (z.B. ListSessions-Limit-Parameter), aber Surface aus S2 nicht refactored
 - **QS-Aufmerksamkeit (erhöht, kein Routine-Gate):** S3 ist erster echter CLI-UX-Sprung — Config-Discovery, Format-Output, Error-Handling. Bei Gate-Bewertung Tabelle/JSON-Verhalten + Discovery-Reihenfolge + Error-Output prüfen, nicht nur Test-Counts.
 - **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit (Config-Loader / Sub-Cmd / Tests), Recovery max 2 Patterns.
-- **Status:** in QS — Tuvok getriggert
+- **Status:** QS auflagen — Findings-Gate durch (Freigabe-mit-Auflagen), 2 Minor offen zum direkten Fix
 - **Verlauf:**
   - 2026-05-14T (Eröffnung) — Chakotay routet S3 an belanna.
   - 2026-05-14T (Delegation) — belanna: Worker-Spawn an ballard (Klasse `feature`). Hub-TOML-Lib bestätigt: `BurntSushi/toml v1.6.0` (`internal/config/`) — wiederverwenden. Implementer-Autonomie für Layout-Detail (Erweiterung `internal/config/` mit `CLIConfig` vs. neues `internal/cliconfig/` für 5-Stufen-Discovery-Wrapper).
-  - 2026-05-14T (Worker-Return) — ballard: 2 Commits (`f35149d` Config-Loader + `0f61bdc` Sub-Cmd), gepusht auf `feat/phase-2-cli`. **Hybrid-Layout:** `internal/config/` um `CLIConfig`-Sektion erweitert (Single-Source-of-Truth, Hub parst+ignoriert), `internal/cliconfig/` neu (5-Stufen-Discovery + Override-Resolver mit injizierbaren Hooks für hermetische Tests). 38 neue Tests (5 config + 18 cliconfig + 13 cmd/cli neu von 2 → 17 — Differenz 15, gesamt-Repo +38), `go vet` clean, `go test -race ./...` repo-weit grün, `go mod tidy` Diff = 0 (kein neuer Dep). Phase-1-Pakete unangetastet. Auth-Fehler zentralisiert in `translateClientError()`, Stacktrace-Leak-Guard im Test (`!strings.Contains(msg, "goroutine")`). `bind = "0.0.0.0"` (Listener) → Connect-`127.0.0.1`-Umschreibung sauber. ListSessions(limit) war bereits in S2 final, C2 entfiel.
+  - 2026-05-14T (Worker-Return) — ballard: 2 Commits (`f35149d` Config-Loader + `0f61bdc` Sub-Cmd), gepusht auf `feat/phase-2-cli`. **Hybrid-Layout:** `internal/config/` um `CLIConfig`-Sektion erweitert (Single-Source-of-Truth, Hub parst+ignoriert), `internal/cliconfig/` neu (5-Stufen-Discovery + Override-Resolver mit injizierbaren Hooks für hermetische Tests). 38 neue Tests (5 config + 20 cliconfig + 13 cmd/cli neu von 2 → 17), `go vet` clean, `go test -race ./...` repo-weit grün, `go mod tidy` Diff = 0 (kein neuer Dep). Phase-1-Pakete unangetastet. Auth-Fehler zentralisiert in `translateClientError()`, Stacktrace-Leak-Guard im Test (`!strings.Contains(msg, "goroutine")`). `bind = "0.0.0.0"` (Listener) → Connect-`127.0.0.1`-Umschreibung sauber. ListSessions(limit) war bereits in S2 final, C2 entfiel.
   - 2026-05-14T (QS-Trigger) — belanna: tuvok-Subagent (Klasse `standard`) für S3-QS. Erhöhte Aufmerksamkeit: Discovery-Reihenfolge ADR-002, Format-Output-UX, Error-Output-Disziplin.
+  - 2026-05-14T (QS-Return) — tuvok (qs-20260514-001): Status `auflagen` / Schweregrad `minor`. Alle 13 DoD-Punkte + Erhöhte-Aufmerksamkeit A/B/D/E/F grün. 2 Minor-Findings (beide *Code-Kommentar widerspricht Code-Verhalten*, kein Code-Bug): **S3-001 (Grenzfall Minor/Major)** — `translateClientError` Z.166-168 Kommentar promises „no raw transport error", aber Z.169 `%v` leakt `dial tcp ...: connect: connection refused`-Detail; Korrekturvorschlag (b): geknappte Wrap-Form + Leak-Guard-Test um `dial tcp`/`Get "http`-Substrings erweitern. **S3-002** — `writeSessionsJSON` Z.201-204 Doc-Comment behauptet „EndedAt is serialised as null when still running", aber `omitempty` lässt das Feld weg (Test bestätigt key-absence). Empfehlung tuvok: Freigabe mit Korrekturen direkt durch belanna, kein Re-QS nötig. **Lesson (Tuvok):** nach 2× 0-Findings-Trance verlagert sich Risiko zu „Doku-Drift im Code selbst" — Kommentare gegen Verhalten cross-checken.
+  - 2026-05-14T (Findings-Gate) — chakotay: **Freigabe-mit-Auflagen.** Strategie/Proportion: 2 Minor (beide Doku-Drift, Sub-5-Min-Fix) auf substantiellen Feature-Sprint (+1511 / 38 Tests) — proportional. S3-001-Hochstufung auf Major verworfen: Doku-Bug ≠ Code-Bug, kein Stacktrace im strikten Sinn (.go:/goroutine clean), kein Secret-Leak, Diagnose-Wert vorhanden. Tuvoks Empfehlung übernommen: Korrektur direkt durch belanna/ballard, kein Re-QS-Gate. S3-001 + S3-002 fixen vor S4-Start (oder im S4-Commit-Trail mitnehmen). Tuvoks Trance-Bruch-Lesson als Promotion-Kandidat in Bookmark (2× Wiederholung → Long-Term-Promotion).
 
 ---
 
