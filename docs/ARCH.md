@@ -112,7 +112,7 @@ No package moves in Phase 2a. Hub code stays untouched.
 | **S3 — `sessions` sub-cmd** | list sessions with `--limit`, `--format=table|json` | first end-to-end use of S2 |
 | **S4 — `tail` sub-cmd** | WS-loop in client (`Tail`), CLI consumer with `--session=<id>`, color by level, SIGINT clean close | finishes the read-side |
 | **S5 — `adb` sub-cmd** | hub-mediated (ADR-004 = Option B): new endpoints `GET /adb/devices`, `POST /adb/start`, `POST /adb/stop` + CLI thin client | Hub schema-change, decided 2026-05-14 |
-| **S6 — `run` sub-cmd** | **open design — see ADR-005 below** | daemon-management strategy → Auto-Stop |
+| ~~S6 — `run` sub-cmd~~ | **dropped (ADR-005 = Option C, decided 2026-05-14)** — `tracelab-hub` ist Daemon-Start, CLI bleibt purer Consumer |
 
 S1–S4 are well-defined and can proceed once ADR-001/-002/-003 are approved.
 S5 and S6 each require an explicit decision before they enter implementation.
@@ -156,7 +156,7 @@ break the „all debugs land at one point"-principle. Schema-Change at the
 Phase-1-merged hub is the explicit Auto-Stop cost; Admin grün given.
 S5 implements three new additive Hub-endpoints + CLI thin client.
 
-#### ADR-005 (OPEN): `tracelab run` semantics
+#### ADR-005: `tracelab run` semantics — Option C (Admin-decided 2026-05-14)
 
 What does `tracelab run` do?
 
@@ -189,7 +189,12 @@ understanding that we revisit after CLI+MCP are in users' hands. Daemon
 management is a separate problem from log consumption, and option B is
 roughly its own sprint.
 
-**Decision pending:** Admin confirm before S6 starts (or removal from DoD).
+**Decision (2026-05-14):** **Option C.** Admin grün gegeben — `run` aus
+Phase 2a gestrichen, S6 wird nicht implementiert. `tracelab-hub` bleibt
+der Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Bei
+realem Bedarf nach Daemon-Management später eigener Sprint mit Option B —
+für jetzt ist die Trennung CLI=Consumer + Hub=Daemon sauberer. DoD von
+AUFTRAG #010 entsprechend angepasst (siehe WORKLOG).
 
 ---
 
