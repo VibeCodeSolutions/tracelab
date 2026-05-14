@@ -6,7 +6,7 @@ last-updated: 2026-05-14
 qs-letzter-lauf: qs-20260514-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd (auflagen — 2 Minor direkter Fix)"
+aktiver-auftrag: "#014 P2a-S4 tail sub-cmd"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -19,6 +19,50 @@ aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd (auflagen — 2 Minor direkter Fi
 > **2026-05-10 TAIL-SPRINT ERÖFFNET (AUFTRAG #009):** Phase-1-Tail räumt M1–M12 in vier thematischen Paketen ab (P1 Doku, P2 ADB-Polish, P3 Crash/Store, P4 Test+Konsistenz). Branch `chore/phase-1-tail`, Commit pro Paket, QS-Sammelgate am Ende. Auto-Stop erwartet bei M11 (Architektur-Entscheidung Publish/Insert-Reihenfolge).
 >
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
+
+---
+
+## AUFTRAG #014 — Tracelab P2a-S4 — `tail` Sub-Cmd
+
+- **Timestamp:** 2026-05-14T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna
+- **Auftrag:** S4 (Read-Side-Abschluss) von Phase 2a. Schließt das CLI-Read-Pfad-Trio (S2 HTTP-Client + S3 `sessions`-Sub-Cmd + S4 `tail`-Sub-Cmd). WS-Loop in `internal/client/` (`Tail`-Methode aus ADR-003) implementieren + CLI-Consumer `tracelab tail --session=<id>` mit Color-by-Level und sauberer SIGINT-Beendigung. Erstmals echte WebSocket-Konsumtion, erstmals echte Nutzung von `[cli].tail_buffer` und `[cli].color` aus S3.
+  - **Repo/Branch:** `/home/kaik/Projekte/tracelab` · `feat/phase-2-cli`@5ab891b (post-#013-Gate)
+  - **ARCH-Ref:** `docs/ARCH.md` ADR-003 (Tail-Methode-Surface), Sub-Sprint S4 Spec
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2-roadmap.md` (Phase 2a, Sub-Sprint S4)
+- **Vorab-Pflicht (Sub-Task A):** S3-Auflagen aus AUFTRAG #013 abarbeiten — direkter Fix durch ballard auf demselben Sprint-Branch, kein Re-QS:
+  - **S3-001:** `cmd/cli/sessions.go` Z.166-169 `translateClientError` Generic-Connection-Path. Wahl Variante (b) aus tuvok-Empfehlung: geknappte Wrap-Form (z.B. via `errors.Unwrap`-Loop bis letztes Glied, oder `errors.Is(err, syscall.ECONNREFUSED)`-Map). Leak-Guard-Test um `dial tcp` und `Get "http` Substrings erweitern.
+  - **S3-002:** `cmd/cli/sessions.go` Z.201-204 `writeSessionsJSON` Doc-Comment Ein-Zeilen-Fix — Aussage muss `omitempty`-Verhalten beschreiben (Feld weggelassen statt `null`-serialisiert).
+  - Commit-Schema: `fix(cli): S3-001 + S3-002 doc-vs-behavior drift` oder zwei einzelne Commits — Implementer-Wahl.
+- **Sub-Task B (Haupt-Implementation):**
+  - `internal/client/`: `(*Client).Tail(ctx context.Context, sessionFilter string, onEvent func(Event)) error` aus ADR-003 implementieren. `gorilla/websocket` (im Repo schon Dep), Bearer-Auth-Header, Reconnect-Strategie NICHT in S4 (Backlog falls nötig).
+  - `cmd/cli/tail.go`: `--session=<id>` (Pflicht-Flag), `--format=plain|json` (Default plain; JSON-Stream-NDJSON oder pro Event eine Zeile), Color-by-Level aus `[cli].color`-Setting (auto: TTY-Detect, always, never). Buffer-Größe aus `[cli].tail_buffer` (default 1024).
+  - SIGINT-Clean-Close: WS-Close-Frame mit Status 1000, kein Stacktrace, Exit-Code 0 bei sauberer Beendigung, !=0 bei Auth/Connection-Fehler.
+  - Error-UX-Disziplin (Lesson aus #013 S3-001): `translateClientError` aus S3 wiederverwenden / erweitern — KEIN paralleler Error-Pfad. Kommentare im Code GEGEN Verhalten cross-checken vor Commit (Trance-Bruch-Prävention).
+- **DoD S4:**
+  - **Vorab:** S3-Auflagen committet (vor S4-Code-Commits), `git log feat/phase-2-cli` zeigt Fix-Commit(s) vor S4-Implementation-Commits.
+  - `tracelab tail --help` zeigt `--session`, `--format`, Color-Verhalten.
+  - `tracelab tail --session=<id>` connectet WS gegen Hub `/ws/tail?session=<id>`, druckt Events live.
+  - `--format=plain` color-formatted nach Level (ERROR rot, WARN gelb, INFO standard, DEBUG dim), Format-Choice respektiert `[cli].color`-Setting (auto/always/never).
+  - `--format=json` druckt NDJSON (pro Event eine `json.Marshal`-Zeile).
+  - SIGINT → sauberer Close, kein Stacktrace, Exit-Code 0.
+  - Auth-Fehler (Token fehlt/falsch beim WS-Handshake) → klare Fehlermeldung + Exit-Code != 0.
+  - Tests gegen `httptest.NewServer` mit `websocket.Upgrader` — Happy-Path (Events streamen), Error-Path (Auth-Fehler bei Handshake), SIGINT-Clean-Close (Context-Cancel als Stand-in).
+  - `go vet ./...` + `go test -race ./...` repo-weit grün.
+  - `go mod tidy` Diff = 0 (gorilla/websocket schon da, kein neuer Dep).
+  - Phase-1-Pakete + Hub-`internal/ws/` unangetastet (Hub liefert die Endpoints schon).
+  - S3-Surface in `internal/client/`: additive Erweiterung (Tail-Methode neu, kein Refactor bestehender HTTP-Methoden).
+  - Sub-Cmd-Stubs `run` und `adb` aus S1 mit Stage-Mapping unangetastet.
+- **QS-Aufmerksamkeit (erhöht, kein Routine-Gate):** WS-Loop ist erstmals echte Bidirektional-IO im Client + erstes Async-Heavy Sub-Cmd. Bei QS-Übergabe gezielt prüfen: SIGINT-Sauberkeit (kein leaking goroutine), WS-Close-Frame, Color-Detection-Disziplin, Error-Output-Pfad-Wiederverwendung (kein Code-Duplikat zu S3). **Kommentar-vs-Verhalten-Check** explizit als Pre-Commit-Disziplin im Worker-Brief (Trance-Bruch-Lesson aus #013).
+- **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit (S3-Auflagen-Fix / Client-Tail-Methode / CLI-Sub-Cmd / Tests). Recovery max 2 Patterns.
+- **Status:** in QS — Tuvok getriggert
+- **Verlauf:**
+  - 2026-05-14T (Eröffnung) — Chakotay routet S4 (mit Vorab-Pflicht S3-Auflagen-Fix) an belanna. Admin-Approval: ja.
+  - 2026-05-14T (Delegation) — belanna: Worker-Spawn an ballard (Klasse `feature` für Gesamt-Auftrag — Sub-A trivial im Commit-Trail vor Sub-B). Single-Spawn statt zwei separater Spawns: ballard kennt den Code aus S2+S3, Commit-Trail-Konsistenz besser, ein Spawn-Overhead gespart. Trance-Bruch-Lesson explizit im Brief: Kommentar-vs-Verhalten-Check als Pre-Commit-Disziplin in neuralgischen Funktionen.
+  - 2026-05-14T (Worker-Return) — ballard: 3 Commits gepusht — Sub-A `df04efc fix(cli): S3-001 + S3-002 doc-vs-behavior drift` (strikt vor Sub-B), Sub-B `62dd595 feat(cli): P2a-S4 client Tail WebSocket method` + `0643ab7 feat(cli): P2a-S4 tail sub-command end-to-end`. **Sub-A:** S3-001 via Variante (i) — `errors.Unwrap`-Loop bis Leaf via Helper `leafErrorMessage` (stdlib-only, OS-agnostisch); S3-002 Doc-Comment erweitert um Konsumenten-Konsequenz. Leak-Guards `dial tcp` + `Get "http` ergänzt, +2 Tests. **Sub-B Implementer-Entscheidungen:** (1) `Event.SessionID` als Public-Field mit `omitempty` statt separater TailEvent-Type; (2) Watcher-Goroutine-Pattern statt gorilla `SetCloseHandler` (explicit owner, lesbarer Code-Pfad); (3) `tailDialError` mappet HTTP-Status auf bestehende Sentinels (HTTP+WS einheitliche `errors.Is`-Familie); (4) synchroner Send-in-onEvent + Printer-Goroutine mit Channel-Size aus `[cli].tail_buffer` (Hub-side drop-on-full greift, CLI droppt nie silent); (5) Color-Detection via `os.Stdout.Stat()+ModeCharDevice` stdlib-only, kein `golang.org/x/term`-Dep; (6) `translateClientError`-Wiederverwendung statt vorzeitige Extraktion (Bookmark: extract bei drittem Konsument S5/S6); (7) `signal.NotifyContext` statt manuelles `signal.Notify`+`os.Exit`; (8) **Endpoint-Korrektur:** Hub-Pfad ist `/tail` (verifiziert in `internal/http/server.go:78`), nicht `/ws/tail` wie im Brief vermutet. **Tests:** internal/client 17→24 (+7), cmd/cli 20→32 (+10 Tail + 2 Sub-A). `go vet` clean, `go test -race ./...` repo-weit grün, `go mod tidy` Diff = 0. Phase-1-Dirs + S2-HTTP-Surface unangetastet, Stubs `run`/`adb` unverändert. **Trance-Bruch-Pre-Commit-Check (Pflicht aus DoD) durchgeführt** — Kommentare in tail.go und Helpers gegen Code-Verhalten cross-gecheckt, keine Drift gefunden. Smoke: `tracelab tail` ohne `--session` → klare Error-Message + Exit 1. Offen: `translateClientError`-Extraktion bei 3. Konsument; Tail-Reconnect-Logik ADR-explizit deferred; Tail-Client-Heartbeat-Floor optional.
+  - 2026-05-14T (QS-Trigger) — belanna: tuvok-Subagent (Klasse `standard`) für S4-QS. Erhöhte Aufmerksamkeit: SIGINT-Sauberkeit (no goroutine leak), WS-Close-Frame, Color-Detection-Disziplin, Error-Output-Pfad-Wiederverwendung kein Code-Duplikat zu S3, Kommentar-vs-Verhalten-Drift (Trance-Bruch-Lesson aus #013 — zweite Anwendung, Promotion-Trigger-Schwelle).
 
 ---
 
