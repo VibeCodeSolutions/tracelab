@@ -14,11 +14,17 @@ import (
 )
 
 // Config is the top-level tracelab configuration.
+//
+// Both the hub daemon and the `tracelab` CLI read the same TOML file (see
+// ADR-002, docs/ARCH.md). The hub ignores the [cli] section; the CLI
+// ignores [server]/[storage]/[adb]. [auth] is shared so token rotation
+// happens in one place.
 type Config struct {
 	Server  ServerConfig  `toml:"server"`
 	Storage StorageConfig `toml:"storage"`
 	Auth    AuthConfig    `toml:"auth"`
 	ADB     ADBConfig     `toml:"adb"`
+	CLI     CLIConfig     `toml:"cli"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -58,6 +64,58 @@ type ADBConfig struct {
 	// TagFilter restricts logcat to one tag (passed as `<tag>:V *:S`
 	// to the adb subprocess). Empty means stream every tag.
 	TagFilter string `toml:"tag_filter"`
+}
+
+// CLIConfig holds knobs consumed by the `tracelab` CLI only. The hub
+// daemon parses but ignores this section — single source of truth per
+// ADR-002.
+//
+// Defaults (applied when a key is missing or zero-valued):
+//
+//	default_format = "table"  # table | json
+//	color          = "auto"   # auto | always | never
+//	tail_buffer    = 1024
+//
+// The `tail_buffer` key is reserved for the S4 `tail` sub-command and is
+// not consumed by the S3 `sessions` path — it is parsed here only so a
+// shared tracelab.toml carrying a populated [cli] block does not fail
+// the hub's strict-config path.
+type CLIConfig struct {
+	// DefaultFormat is the default output renderer when --format is not
+	// passed. Recognised values are "table" and "json". Empty string is
+	// treated as "table".
+	DefaultFormat string `toml:"default_format"`
+	// Color controls ANSI-colour output. Recognised values: "auto",
+	// "always", "never". Empty string is treated as "auto". Not used by
+	// the S3 `sessions` path (no level-coloured output yet) but parsed
+	// here so an [cli] block with a populated colour key does not error.
+	Color string `toml:"color"`
+	// TailBuffer is the per-subscriber buffered-channel size used by the
+	// S4 `tail` sub-command. Zero is treated as 1024. Parsed here for
+	// completeness; not consumed by the S3 path.
+	TailBuffer int `toml:"tail_buffer"`
+}
+
+// Defaults for CLIConfig — exported so callers (e.g. cliconfig.Resolve)
+// can apply them consistently without duplicating the literals.
+const (
+	DefaultCLIFormat     = "table"
+	DefaultCLIColor      = "auto"
+	DefaultCLITailBuffer = 1024
+)
+
+// ApplyDefaults fills zero-valued CLIConfig fields with their defaults.
+// Safe to call multiple times; idempotent.
+func (c *CLIConfig) ApplyDefaults() {
+	if c.DefaultFormat == "" {
+		c.DefaultFormat = DefaultCLIFormat
+	}
+	if c.Color == "" {
+		c.Color = DefaultCLIColor
+	}
+	if c.TailBuffer == 0 {
+		c.TailBuffer = DefaultCLITailBuffer
+	}
 }
 
 // Load reads the TOML config at path and applies defaults.
