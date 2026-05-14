@@ -1,8 +1,11 @@
 // Command tracelab-hub is the Tracelab daemon.
 //
-// Phase 1 / Stage 3: chi-based HTTP server with bearer auth wired to the
-// SQLite store. Lifecycle: load config → open store → start http.Server in a
-// goroutine → wait for SIGINT/SIGTERM → graceful shutdown (5s) → close store.
+// Phase 2a / Stage 5: chi-based HTTP server with bearer auth, /tail WS
+// fan-out, and hub-managed adb bridges (ADR-004 Option B). Lifecycle:
+// load config → open store → create ws hub → create adb bridge manager →
+// optionally auto-start one bridge from [adb] config → start http.Server
+// in a goroutine → wait for SIGINT/SIGTERM → graceful shutdown (adb
+// bridges → ws hub → http server) → close store.
 package main
 
 import (
@@ -28,6 +31,16 @@ import (
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 var version = "0.1.0-dev"
+
+// adbDeviceListerFunc adapts a plain `func(ctx) ([]adb.Device, error)` to
+// the httplayer.ADBDeviceLister interface. Used to point the HTTP layer at
+// the package-level adb.Devices function without standing up a wrapper
+// struct in cmd/hub.
+type adbDeviceListerFunc func(ctx context.Context) ([]adb.Device, error)
+
+func (f adbDeviceListerFunc) Devices(ctx context.Context) ([]adb.Device, error) {
+	return f(ctx)
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -68,13 +81,26 @@ func run() error {
 	hub := ws.NewHub(0)
 	defer hub.Close()
 
+	// adb bridge manager + device-lister adapter feed the new /adb/* HTTP
+	// endpoints (S5, ADR-004 Option B). Both are wired unconditionally —
+	// they cost nothing when no client touches the endpoints, and they
+	// let the CLI / future MCP server drive the bridges over HTTP.
+	adbMgr := adb.NewBridgeManager(adb.BridgeManagerDeps{
+		Store:  st,
+		Hub:    hub,
+		Logger: logger,
+	})
+	defer adbMgr.Close()
+
 	addr := cfg.Server.Bind + ":" + strconv.Itoa(cfg.Server.Port)
 	handler := httplayer.New(st, httplayer.Config{
-		AuthToken:    cfg.Auth.Token,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		Logger:       logger,
-		Hub:          hub,
+		AuthToken:       cfg.Auth.Token,
+		ReadTimeout:     cfg.Server.ReadTimeout,
+		WriteTimeout:    cfg.Server.WriteTimeout,
+		Logger:          logger,
+		Hub:             hub,
+		ADBManager:      adbMgr,
+		ADBDeviceLister: adbDeviceListerFunc(adb.Devices),
 	})
 	if handler == nil {
 		return errors.New("http: New returned nil (auth token empty?)")
@@ -100,40 +126,32 @@ func run() error {
 	)
 	logger.Info("http server listening", slog.String("addr", addr))
 
-	// Optional adb-logcat bridge. Owned by main: started here under a
-	// child context derived from ctx so we can stop the bridge *before*
-	// hub.Close (otherwise its trailing Publish call would race the
-	// hub teardown). bridgeDone is closed when Run returns.
-	var (
-		bridgeCancel context.CancelFunc
-		bridgeDone   chan struct{}
-	)
+	// Optional config-driven adb-logcat bridge. Owned by the bridge
+	// manager, started via adbMgr.Start so the cfg.ADB.Enabled path goes
+	// through the same lifecycle as bridges launched on demand via
+	// POST /adb/start. The manager owns the goroutine; we wait for its
+	// teardown via adbMgr.Close in the shutdown block below — that
+	// preserves the "bridge stops before hub.Close" invariant from S7.
+	//
+	// Empty DeviceSerial in cfg.ADB is rejected here: the manager keys
+	// bridges by serial, and the legacy "let adb pick" mode doesn't
+	// compose with multi-device management. Operators who relied on
+	// auto-pick should set [adb].device_serial explicitly going forward
+	// (single-device dev boxes can copy the value from `adb devices`).
 	if cfg.ADB.Enabled {
-		br := adb.NewBridge(adb.BridgeConfig{
-			DeviceSerial: cfg.ADB.DeviceSerial,
-			TagFilter:    cfg.ADB.TagFilter,
-			Store:        st,
-			Hub:          hub,
-			Logger:       logger,
-		})
-		var bridgeCtx context.Context
-		bridgeCtx, bridgeCancel = context.WithCancel(ctx)
-		// Safety net: even if a later return-path skips the explicit
-		// shutdown sequence below, the deferred cancel guarantees the
-		// bridge goroutine terminates. The explicit cancel+wait below
-		// is what actually orders the slog messages on the happy path.
-		defer bridgeCancel()
-		bridgeDone = make(chan struct{})
+		if cfg.ADB.DeviceSerial == "" {
+			return errors.New("config: [adb].enabled=true requires [adb].device_serial (S5: bridges are keyed by serial)")
+		}
 		logger.Info("adb bridge enabled",
 			slog.String("device_serial", cfg.ADB.DeviceSerial),
 			slog.String("tag_filter", cfg.ADB.TagFilter),
 		)
-		go func() {
-			defer close(bridgeDone)
-			if err := br.Run(bridgeCtx); err != nil {
-				logger.Error("adb bridge exited", slog.Any("error", err))
-			}
-		}()
+		if _, err := adbMgr.Start(adb.BridgeStartOptions{
+			DeviceSerial: cfg.ADB.DeviceSerial,
+			TagFilter:    cfg.ADB.TagFilter,
+		}); err != nil {
+			return fmt.Errorf("adb bridge auto-start: %w", err)
+		}
 	}
 
 	serveErr := make(chan error, 1)
@@ -154,17 +172,16 @@ func run() error {
 	}
 
 	// Shutdown ordering matters and is observable in slog:
-	//   1. adb bridge stopping (publishes drained, session ended)
+	//   1. adb bridges stopping (publishes drained, sessions ended) — all
+	//      managed bridges, regardless of whether they were auto-started
+	//      via cfg.ADB or launched on demand via POST /adb/start.
 	//   2. websocket hub closed (subscribers released, close-frames sent)
 	//   3. http server stopped (graceful srv.Shutdown returns)
 	// Reversed orders would either lose late events (hub.Close before
-	// bridge stops races a Publish) or stall srv.Shutdown waiting on
+	// bridges stop races a Publish) or stall srv.Shutdown waiting on
 	// hijacked /tail conns (srv.Shutdown before hub.Close).
-	if bridgeCancel != nil {
-		bridgeCancel()
-		<-bridgeDone
-		logger.Info("adb bridge stopped")
-	}
+	adbMgr.Close()
+	logger.Info("adb bridges stopped")
 
 	hub.Close()
 	logger.Info("websocket hub closed")

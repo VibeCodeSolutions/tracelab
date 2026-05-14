@@ -37,7 +37,29 @@ type Config struct {
 	// Hub is the WebSocket pub/sub fan-out for /tail. If nil, /tail is not
 	// registered and /ingest skips the broadcast step.
 	Hub *ws.Hub
+
+	// ADBManager is the bridge lifecycle coordinator for the /adb/* HTTP
+	// endpoints (POST /adb/start, POST /adb/stop, GET /adb/devices). When
+	// nil, the /adb/* routes are not registered — the hub then behaves
+	// exactly like a pre-S5 build.
+	ADBManager ADBManager
+
+	// ADBDeviceLister enumerates attached adb devices for GET /adb/devices.
+	// Typically the package-level function adb.Devices, wrapped in an
+	// adapter (see cmd/hub/main.go). When nil, GET /adb/devices is not
+	// registered — POST /adb/start and POST /adb/stop may still be wired
+	// up via ADBManager alone, but device discovery is unavailable.
+	ADBDeviceLister ADBDeviceLister
 }
+
+// ADBManager is re-exported from internal/adb at the HTTP-layer boundary
+// so server.New takes a small typed interface rather than the full
+// *adb.BridgeManager. Production callers pass an *adb.BridgeManager (which
+// satisfies this interface); tests inject a fake.
+type ADBManager = adbBridgeManager
+
+// ADBDeviceLister is re-exported similarly to ADBManager — see above.
+type ADBDeviceLister = adbDeviceLister
 
 // New constructs the chi router with the full middleware stack and routes
 // wired to the given store.
@@ -83,6 +105,27 @@ func New(st *store.Store, cfg Config) http.Handler {
 			tr.Post("/session/end", h.sessionEnd)
 			tr.Post("/ingest", h.ingest)
 			tr.Get("/sessions", h.listSessions)
+
+			// /adb/* routes — additive in S5 (ADR-004 Option B).
+			// Registered inside the same timeout-bounded group as the
+			// other JSON endpoints: GET /adb/devices shells out to
+			// `adb devices -l` which can wedge if the local adb server
+			// is hung, so a 30s wall-clock cap is the right safety net.
+			// POST /adb/start kicks off a manager goroutine and returns
+			// immediately, so it sits well under the timeout. POST
+			// /adb/stop blocks on bridge teardown — bounded by the
+			// underlying ctx-cancel + 2s detached flush in bridge.go.
+			adbH := &adbHandlers{
+				lister:  cfg.ADBDeviceLister,
+				manager: cfg.ADBManager,
+			}
+			if cfg.ADBDeviceLister != nil {
+				tr.Get("/adb/devices", adbH.devicesHandler)
+			}
+			if cfg.ADBManager != nil {
+				tr.Post("/adb/start", adbH.startHandler)
+				tr.Post("/adb/stop", adbH.stopHandler)
+			}
 		})
 	})
 

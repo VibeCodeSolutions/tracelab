@@ -26,7 +26,9 @@ import (
 //  1. bridge starts (slog "adb bridge starting")
 //  2. lines from fake adb arrive in events table with source="adb"
 //  3. SIGTERM produces the documented stop ordering in slog:
-//     "adb bridge stopped" → "websocket hub closed" → "http server stopped".
+//     "adb bridges stopped" → "websocket hub closed" → "http server stopped".
+//     (Renamed in S5 when the daemon switched to BridgeManager.Close which
+//     fans out across all running bridges.)
 //
 // Skipped on Windows (the fake adb is a POSIX shell script). This is a
 // medium-weight integration test: it builds the binary, runs it, and
@@ -166,7 +168,12 @@ func TestHub_End2End_AdbBridge(t *testing.T) {
 	}
 
 	logs := stderr.String()
-	bridgeIdx := strings.Index(logs, `"adb bridge stopped"`)
+	// S5: the singular "adb bridge stopped" line was renamed to plural
+	// "adb bridges stopped" once the daemon switched to managing bridges
+	// through BridgeManager.Close (which fans out across however many
+	// bridges are running). The ordering invariant — adb teardown before
+	// hub.Close, hub.Close before srv.Shutdown — is unchanged.
+	bridgeIdx := strings.Index(logs, `"adb bridges stopped"`)
 	hubIdx := strings.Index(logs, `"websocket hub closed"`)
 	httpIdx := strings.Index(logs, `"http server stopped"`)
 	if bridgeIdx < 0 || hubIdx < 0 || httpIdx < 0 {
