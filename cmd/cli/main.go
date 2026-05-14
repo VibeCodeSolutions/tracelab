@@ -1,9 +1,10 @@
 // Command tracelab is the Tracelab CLI.
 //
-// Phase 2a / Stage 4: `sessions` and `tail` are now wired end-to-end
+// Phase 2a / Stage 5: `sessions`, `tail`, and `adb` are wired end-to-end
 // against the shared client (internal/client/) and the config-discovery
-// helper (internal/cliconfig/). `run` and `adb` remain stubs; real
-// behaviour lands in S5 (adb) and S6 (run).
+// helper (internal/cliconfig/). `adb` drives the hub's new /adb/* HTTP
+// endpoints (ADR-004 Option B). `run` remains a stub; real behaviour
+// lands in S6 (pending ADR-005).
 package main
 
 import (
@@ -49,7 +50,7 @@ func newRootCmd() *cobra.Command {
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		// userErrorMsg (defined in sessions.go) carries an
+		// userErrorMsg (defined in errors.go) carries an
 		// already-formatted user-facing message — print it cleanly,
 		// no stack trace, no Go-internal noise.
 		if msg, ok := asUserError(err); ok {
