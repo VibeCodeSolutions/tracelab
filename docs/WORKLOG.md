@@ -2,11 +2,11 @@
 type: worklog
 projekt: tracelab
 status: phase-2a-laufend
-last-updated: 2026-05-13
+last-updated: 2026-05-14
 qs-letzter-lauf: qs-20260513-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "#010 Phase-2a CLI"
+aktiver-auftrag: "#013 P2a-S3 sessions sub-cmd"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,7 +22,49 @@ aktiver-auftrag: "#010 Phase-2a CLI"
 
 ---
 
-## AUFTRAG #012 — Tracelab P2a-S2 — Client Paket
+## AUFTRAG #013 — Tracelab P2a-S3 — `sessions` Sub-Cmd
+
+- **Timestamp:** 2026-05-14T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna
+- **Auftrag:** S3 (Erstes End-to-End-CLI) von Phase 2a. Verdrahtet das `sessions`-Sub-Cmd mit dem Client-Paket aus S2 (`internal/client/`) und etabliert dabei erstmals die Config-Discovery (5-Stufen-Reihenfolge aus ADR-002) plus die neue `[cli]`-Sektion in `tracelab.toml`. Erstes echtes CLI-UX — `--limit`, `--format=table|json`.
+  - **Repo/Branch:** `/home/kaik/Projekte/tracelab` · `feat/phase-2-cli`@872dee6
+  - **ARCH-Ref:** `docs/ARCH.md` ADR-001/-002/-003 (Admin-grün 2026-05-13)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2-roadmap.md` (Phase 2a, Sub-Sprint S3)
+- **Scope-Cuts (Minimum für S3):**
+  - Config-Discovery: `--config` → `$TRACELAB_CONFIG` → `./tracelab.toml` → `$XDG_CONFIG_HOME/tracelab/tracelab.toml` → `~/.config/tracelab/tracelab.toml` (Reihenfolge aus ADR-002)
+  - Per-Invocation-Overrides: `--url`, `--token`, env `TRACELAB_URL` / `TRACELAB_TOKEN`
+  - `[cli]`-Sektion (initial keys aus ADR-002): `default_format`, `color`, `tail_buffer` (letzteres erst in S4 echt benutzt — aber Parser muss es schon kennen, damit `tracelab.toml` mit `[cli]`-Block kein Fehler wirft)
+  - `tracelab sessions --limit N --format table|json`:
+    - Default-`limit` = sensibler Default (z.B. 20), Override via Flag
+    - Default-Format aus `[cli].default_format`, Override via Flag
+    - `table`: tab-aligned (ID, Label, Started, Ended/„running")
+    - `json`: array von Session-DTOs, pretty-print
+  - Exit-Codes: 0 grün, !=0 bei Fehler (Connection / Auth / Server)
+  - Auth-Fehler-Output: knappe Fehlermeldung („unauthorized — check token") statt Go-Stacktrace
+- **DoD S3:**
+  - `tracelab sessions --help` zeigt beide Flags
+  - `tracelab sessions` (ohne Flags) lädt Config in Discovery-Reihenfolge, kontaktiert Hub, druckt Tabelle
+  - `--format=json` druckt validen JSON-Array
+  - `--limit 5` limitiert auf 5 Einträge
+  - `--url` / `--token` / env-Vars überschreiben Config-Werte (alle 3 Schichten getestet)
+  - Auth-Fehler (Token fehlt / falsch) → klare Fehlermeldung + Exit-Code != 0, kein Stacktrace
+  - Config-Discovery-Tests: pro Schicht mindestens 1 Test (`--config` explizit, env, cwd, XDG, default)
+  - `go vet ./...` + `go test -race ./...` repo-weit grün
+  - Keine neuen Deps außerhalb bestehender (cobra/chi/gorilla/stdlib) — TOML-Parser ist im Hub schon drin, dieselbe Lib nutzen
+  - cmd/hub/ + Phase-1-Pakete unangetastet
+  - `internal/client/` ggf. minimal ergänzt (z.B. ListSessions-Limit-Parameter), aber Surface aus S2 nicht refactored
+- **QS-Aufmerksamkeit (erhöht, kein Routine-Gate):** S3 ist erster echter CLI-UX-Sprung — Config-Discovery, Format-Output, Error-Handling. Bei Gate-Bewertung Tabelle/JSON-Verhalten + Discovery-Reihenfolge + Error-Output prüfen, nicht nur Test-Counts.
+- **Auto-Continuation-Modus:** 5a-Default — Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit (Config-Loader / Sub-Cmd / Tests), Recovery max 2 Patterns.
+- **Status:** in QS — Tuvok getriggert
+- **Verlauf:**
+  - 2026-05-14T (Eröffnung) — Chakotay routet S3 an belanna.
+  - 2026-05-14T (Delegation) — belanna: Worker-Spawn an ballard (Klasse `feature`). Hub-TOML-Lib bestätigt: `BurntSushi/toml v1.6.0` (`internal/config/`) — wiederverwenden. Implementer-Autonomie für Layout-Detail (Erweiterung `internal/config/` mit `CLIConfig` vs. neues `internal/cliconfig/` für 5-Stufen-Discovery-Wrapper).
+  - 2026-05-14T (Worker-Return) — ballard: 2 Commits (`f35149d` Config-Loader + `0f61bdc` Sub-Cmd), gepusht auf `feat/phase-2-cli`. **Hybrid-Layout:** `internal/config/` um `CLIConfig`-Sektion erweitert (Single-Source-of-Truth, Hub parst+ignoriert), `internal/cliconfig/` neu (5-Stufen-Discovery + Override-Resolver mit injizierbaren Hooks für hermetische Tests). 38 neue Tests (5 config + 18 cliconfig + 13 cmd/cli neu von 2 → 17 — Differenz 15, gesamt-Repo +38), `go vet` clean, `go test -race ./...` repo-weit grün, `go mod tidy` Diff = 0 (kein neuer Dep). Phase-1-Pakete unangetastet. Auth-Fehler zentralisiert in `translateClientError()`, Stacktrace-Leak-Guard im Test (`!strings.Contains(msg, "goroutine")`). `bind = "0.0.0.0"` (Listener) → Connect-`127.0.0.1`-Umschreibung sauber. ListSessions(limit) war bereits in S2 final, C2 entfiel.
+  - 2026-05-14T (QS-Trigger) — belanna: tuvok-Subagent (Klasse `standard`) für S3-QS. Erhöhte Aufmerksamkeit: Discovery-Reihenfolge ADR-002, Format-Output-UX, Error-Output-Disziplin.
+
+---
 
 - **Timestamp:** 2026-05-13T (Eröffnung)
 - **Von:** belanna
