@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -131,67 +130,6 @@ func runSessions(cmd *cobra.Command, flags sessionsFlags) error {
 	return nil // unreachable — guarded above
 }
 
-// userError is a sentinel-wrapped error type that signals "this is a
-// user-facing message; do NOT print a stack trace". main() inspects this
-// to decide whether to render `tracelab: <msg>` (clean) or the default
-// `tracelab: <err>` (which is the same in practice, but the wrapper
-// keeps the door open for richer formatting later, and documents intent).
-type userErrorMsg string
-
-func (u userErrorMsg) Error() string { return string(u) }
-
-func userError(msg string) error { return userErrorMsg(msg) }
-
-// translateClientError maps a *client.HTTPError or sentinel to a short,
-// actionable user message. Hub URL is included to help the user verify
-// they are talking to the right place.
-func translateClientError(err error, resolved *cliconfig.Resolved) error {
-	if errors.Is(err, client.ErrUnauthorized) {
-		return userError("unauthorized — check token in tracelab.toml or TRACELAB_TOKEN")
-	}
-	if errors.Is(err, client.ErrServerError) {
-		var he *client.HTTPError
-		if errors.As(err, &he) {
-			return userError(fmt.Sprintf("hub error (HTTP %d) from %s", he.Status, resolved.BaseURL))
-		}
-		return userError(fmt.Sprintf("hub error from %s", resolved.BaseURL))
-	}
-	var he *client.HTTPError
-	if errors.As(err, &he) {
-		return userError(fmt.Sprintf("hub responded HTTP %d for %s", he.Status, he.Endpoint))
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return userError(fmt.Sprintf("timeout contacting hub at %s", resolved.BaseURL))
-	}
-	// Generic connection failure — surface the BaseURL plus only the
-	// innermost cause string, never the wrapped chain. The Go HTTP stack
-	// wraps transport errors as:
-	//
-	//   client: GET /sessions: Get "http://host:port/sessions":
-	//       dial tcp 127.0.0.1:1234: connect: connection refused
-	//
-	// Walking errors.Unwrap to the leaf yields just "connection refused"
-	// (or "i/o timeout", "no such host", …) — actionable to the user,
-	// without leaking host/port/syscall details that change between OSes.
-	return userError(fmt.Sprintf("cannot reach hub at %s: %s", resolved.BaseURL, leafErrorMessage(err)))
-}
-
-// leafErrorMessage walks the errors.Unwrap chain to the deepest non-nil
-// link and returns its Error() string. Used by translateClientError to
-// strip the Go HTTP stack's nested "GET /foo: Get \"http://...\": dial
-// tcp <addr>: connect: …" wrap noise down to the actionable root cause.
-//
-// Falls back to err.Error() when the chain is single-link.
-func leafErrorMessage(err error) string {
-	for {
-		next := errors.Unwrap(err)
-		if next == nil {
-			return err.Error()
-		}
-		err = next
-	}
-}
-
 // writeSessionsTable renders the table format: ID, Label, Started,
 // Ended. A running session shows "running" in the Ended column.
 //
@@ -240,16 +178,5 @@ func writeSessionsJSON(w io.Writer, sessions []client.Session) error {
 		return err
 	}
 	return nil
-}
-
-// asUserError returns the message and true when err carries a userErrorMsg
-// somewhere in its chain. main() uses this to decide between clean
-// stderr-print and the default cobra rendering.
-func asUserError(err error) (string, bool) {
-	var u userErrorMsg
-	if errors.As(err, &u) {
-		return string(u), true
-	}
-	return "", false
 }
 
