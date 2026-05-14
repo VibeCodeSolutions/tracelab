@@ -163,10 +163,33 @@ func translateClientError(err error, resolved *cliconfig.Resolved) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return userError(fmt.Sprintf("timeout contacting hub at %s", resolved.BaseURL))
 	}
-	// Generic connection failure — surface the BaseURL but not the raw
-	// transport error (which would include Go-internal noise like dial-tcp
-	// addresses).
-	return userError(fmt.Sprintf("cannot reach hub at %s: %v", resolved.BaseURL, err))
+	// Generic connection failure — surface the BaseURL plus only the
+	// innermost cause string, never the wrapped chain. The Go HTTP stack
+	// wraps transport errors as:
+	//
+	//   client: GET /sessions: Get "http://host:port/sessions":
+	//       dial tcp 127.0.0.1:1234: connect: connection refused
+	//
+	// Walking errors.Unwrap to the leaf yields just "connection refused"
+	// (or "i/o timeout", "no such host", …) — actionable to the user,
+	// without leaking host/port/syscall details that change between OSes.
+	return userError(fmt.Sprintf("cannot reach hub at %s: %s", resolved.BaseURL, leafErrorMessage(err)))
+}
+
+// leafErrorMessage walks the errors.Unwrap chain to the deepest non-nil
+// link and returns its Error() string. Used by translateClientError to
+// strip the Go HTTP stack's nested "GET /foo: Get \"http://...\": dial
+// tcp <addr>: connect: …" wrap noise down to the actionable root cause.
+//
+// Falls back to err.Error() when the chain is single-link.
+func leafErrorMessage(err error) string {
+	for {
+		next := errors.Unwrap(err)
+		if next == nil {
+			return err.Error()
+		}
+		err = next
+	}
 }
 
 // writeSessionsTable renders the table format: ID, Label, Started,
@@ -201,7 +224,8 @@ func formatSessionTime(ns int64) string {
 // writeSessionsJSON renders the JSON format: an array of Session DTOs,
 // pretty-printed with two-space indent. The DTO matches the client
 // package's wire shape (see internal/client/types.go) — pointer EndedAt
-// is serialised as `null` when the session is still running.
+// is omitted (omitempty) when the session is still running; clients
+// distinguish running vs. ended by key absence, not by a `null` value.
 func writeSessionsJSON(w io.Writer, sessions []client.Session) error {
 	// json.MarshalIndent on a nil slice produces "null"; for an empty
 	// slice we want "[]" (consistent with the hub).

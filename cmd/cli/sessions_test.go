@@ -290,6 +290,57 @@ func TestSessions_Unauthorized_UserError(t *testing.T) {
 	if strings.Contains(msg, "goroutine") || strings.Contains(msg, ".go:") {
 		t.Errorf("error message leaks Go internals: %q", msg)
 	}
+	// S3-001 leak-guard: even though the unauthorized path runs translation
+	// on a clean *HTTPError, double-check the message never carries
+	// transport-wrap fragments (which would only appear on the connection-
+	// refused path, but the guard is cheap and protects against regression
+	// if the auth branch ever falls through to the generic wrap).
+	for _, leak := range []string{"dial tcp", `Get "http`} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("error message leaks transport noise %q: %q", leak, msg)
+		}
+	}
+}
+
+// TestSessions_ConnectionRefused_UserError exercises the generic transport-
+// error path: there is nothing listening on the chosen URL, so the Go HTTP
+// stack returns a wrapped chain
+//
+//   client: GET /sessions: Get "http://127.0.0.1:1/sessions": dial tcp …
+//       127.0.0.1:1: connect: connection refused
+//
+// translateClientError must strip the wrap noise and surface only the
+// leaf cause. The leak-guard pins this contract.
+func TestSessions_ConnectionRefused_UserError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := writeMinimalConfig(t, dir, "tok")
+	// Port 1 is reserved + privileged — guaranteed connection refused on
+	// every supported host without external dependencies.
+	_, _, err := runCLI(t,
+		"sessions",
+		"--config", cfg,
+		"--url", "http://127.0.0.1:1",
+	)
+	if err == nil {
+		t.Fatal("expected error for connection refused")
+	}
+	msg, ok := asUserError(err)
+	if !ok {
+		t.Fatalf("expected userError, got %T: %v", err, err)
+	}
+	if !strings.Contains(msg, "cannot reach hub at") {
+		t.Errorf("missing user-facing prefix: %q", msg)
+	}
+	if !strings.Contains(msg, "127.0.0.1:1") {
+		t.Errorf("user message should keep the BaseURL anchor: %q", msg)
+	}
+	// Transport-wrap fragments MUST NOT leak.
+	for _, leak := range []string{"dial tcp", `Get "http`, "goroutine", ".go:"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("error message leaks %q: %q", leak, msg)
+		}
+	}
 }
 
 func TestSessions_ServerError_UserError(t *testing.T) {
