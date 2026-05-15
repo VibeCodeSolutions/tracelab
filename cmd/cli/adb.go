@@ -173,7 +173,7 @@ func runADBStart(cmd *cobra.Command, serial, sessionID string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), adbTimeout)
 	defer cancel()
 
-	if err := c.StartADBBridge(ctx, serial, sessionID); err != nil {
+	if _, err := c.StartADBBridge(ctx, serial, sessionID); err != nil {
 		return translateClientError(err, resolved)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "bridge started for %s\n", serial)
@@ -190,7 +190,7 @@ func runADBStop(cmd *cobra.Command, serial string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), adbTimeout)
 	defer cancel()
 
-	if err := c.StopADBBridge(ctx, serial); err != nil {
+	if _, err := c.StopADBBridge(ctx, serial); err != nil {
 		return translateClientError(err, resolved)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "bridge stopped for %s\n", serial)

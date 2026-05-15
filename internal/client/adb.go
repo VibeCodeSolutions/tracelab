@@ -95,27 +95,36 @@ func (c *Client) ListADBDevices(ctx context.Context) ([]ADBDevice, error) {
 // Idempotency: the hub returns 200 OK whether the bridge was freshly
 // started or already running (the JSON body's `status` field carries the
 // discrimination — see internal/http/adb.go startHandler). StartADBBridge
-// folds both cases into nil so simple CLI/MCP scripts can `start <serial>`
-// as a "make sure it's running" primitive. Callers who need the
-// distinction should call ListADBDevices for state inspection.
+// surfaces the hub's status as the first return value so callers that
+// need the distinction (e.g. MCP tools reporting "already running" to
+// Claude Code) can pass it through; CLI scripts that only need the
+// idempotent "ensure running" semantic can ignore it via `_, err := ...`.
+//
+// Return values:
+//   - status: "started" | "already_running" (hub-side discriminator).
+//     Empty string on error.
+//   - err: client-side rejection or transport error (see below).
 //
 // Errors:
 //   - empty serial → client-side rejection (no network round-trip)
 //   - 401/403 → ErrUnauthorized
 //   - 5xx → ErrServerError (wrapped in *HTTPError)
 //   - other 4xx → *HTTPError
-func (c *Client) StartADBBridge(ctx context.Context, serial, sessionID string) error {
+func (c *Client) StartADBBridge(ctx context.Context, serial, sessionID string) (string, error) {
 	if serial == "" {
-		return errors.New("client: StartADBBridge requires a non-empty serial")
+		return "", errors.New("client: StartADBBridge requires a non-empty serial")
 	}
 	var resp adbStartRespWire
-	return c.doRequest(ctx, requestOpts{
+	if err := c.doRequest(ctx, requestOpts{
 		method:   http.MethodPost,
 		path:     "/adb/start",
 		body:     adbStartReqWire{Serial: serial, Session: sessionID},
 		auth:     true,
 		respInto: &resp,
-	})
+	}); err != nil {
+		return "", err
+	}
+	return resp.Status, nil
 }
 
 // StopADBBridge asks the hub to stop the adb logcat bridge for the given
@@ -123,21 +132,25 @@ func (c *Client) StartADBBridge(ctx context.Context, serial, sessionID string) e
 //
 // Idempotency: the hub returns 200 OK whether the bridge was actively
 // running or already gone (the body's `status` field is "stopped" vs.
-// "not_running"). Like StartADBBridge, this client method folds both
-// cases into nil; the caller does not have to track bridge state to do
-// safe shutdowns.
+// "not_running"). The status is surfaced as the first return value so
+// callers that care about the distinction can pass it through; callers
+// that only need the idempotent "ensure stopped" semantic can ignore it
+// via `_, err := ...`.
 //
 // Errors mirror StartADBBridge (sentinel pattern via *HTTPError + Unwrap).
-func (c *Client) StopADBBridge(ctx context.Context, serial string) error {
+func (c *Client) StopADBBridge(ctx context.Context, serial string) (string, error) {
 	if serial == "" {
-		return errors.New("client: StopADBBridge requires a non-empty serial")
+		return "", errors.New("client: StopADBBridge requires a non-empty serial")
 	}
 	var resp adbStopRespWire
-	return c.doRequest(ctx, requestOpts{
+	if err := c.doRequest(ctx, requestOpts{
 		method:   http.MethodPost,
 		path:     "/adb/stop",
 		body:     adbStopReqWire{Serial: serial},
 		auth:     true,
 		respInto: &resp,
-	})
+	}); err != nil {
+		return "", err
+	}
+	return resp.Status, nil
 }

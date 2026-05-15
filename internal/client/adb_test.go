@@ -128,8 +128,12 @@ func TestStartADBBridge_Fresh(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"started","serial":"emulator-5554","started_at":1700000000000000000}`))
 	})
 	c, _ := newTestServer(t, h)
-	if err := c.StartADBBridge(context.Background(), "emulator-5554", "sess-9"); err != nil {
+	status, err := c.StartADBBridge(context.Background(), "emulator-5554", "sess-9")
+	if err != nil {
 		t.Errorf("StartADBBridge: %v", err)
+	}
+	if status != "started" {
+		t.Errorf("status = %q, want %q (discriminator pass-through)", status, "started")
 	}
 }
 
@@ -139,9 +143,15 @@ func TestStartADBBridge_AlreadyRunning_Idempotent(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"already_running","serial":"emulator-5554","started_at":1700000000000000000}`))
 	})
 	c, _ := newTestServer(t, h)
-	// Idempotent contract: an already-running bridge surfaces as nil.
-	if err := c.StartADBBridge(context.Background(), "emulator-5554", ""); err != nil {
+	// Idempotent contract: an already-running bridge surfaces as a nil
+	// error with status="already_running" as the discriminator (added
+	// in P2b-S5 so MCP tools can report state-of-the-world to LLMs).
+	status, err := c.StartADBBridge(context.Background(), "emulator-5554", "")
+	if err != nil {
 		t.Errorf("idempotent already_running should not error, got: %v", err)
+	}
+	if status != "already_running" {
+		t.Errorf("status = %q, want %q (discriminator pass-through)", status, "already_running")
 	}
 }
 
@@ -149,9 +159,12 @@ func TestStartADBBridge_EmptySerial(t *testing.T) {
 	c, _ := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("hub should not be called when serial is empty")
 	}))
-	err := c.StartADBBridge(context.Background(), "", "")
+	status, err := c.StartADBBridge(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("expected error for empty serial")
+	}
+	if status != "" {
+		t.Errorf("status on error = %q, want empty", status)
 	}
 }
 
@@ -160,9 +173,12 @@ func TestStartADBBridge_Unauthorized(t *testing.T) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	})
 	c, _ := newTestServer(t, h)
-	err := c.StartADBBridge(context.Background(), "x", "")
+	status, err := c.StartADBBridge(context.Background(), "x", "")
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Errorf("expected ErrUnauthorized, got %v", err)
+	}
+	if status != "" {
+		t.Errorf("status on auth-fail = %q, want empty", status)
 	}
 }
 
@@ -171,7 +187,7 @@ func TestStartADBBridge_BadRequest(t *testing.T) {
 		http.Error(w, `{"error":"serial required"}`, http.StatusBadRequest)
 	})
 	c, _ := newTestServer(t, h)
-	err := c.StartADBBridge(context.Background(), "x", "")
+	_, err := c.StartADBBridge(context.Background(), "x", "")
 	if err == nil {
 		t.Fatal("expected error for 400")
 	}
@@ -198,7 +214,8 @@ func TestStartADBBridge_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- c.StartADBBridge(ctx, "emu", "")
+		_, err := c.StartADBBridge(ctx, "emu", "")
+		errCh <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
@@ -232,8 +249,12 @@ func TestStopADBBridge_Stopped(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"stopped","serial":"emulator-5554"}`))
 	})
 	c, _ := newTestServer(t, h)
-	if err := c.StopADBBridge(context.Background(), "emulator-5554"); err != nil {
+	status, err := c.StopADBBridge(context.Background(), "emulator-5554")
+	if err != nil {
 		t.Errorf("StopADBBridge: %v", err)
+	}
+	if status != "stopped" {
+		t.Errorf("status = %q, want %q (discriminator pass-through)", status, "stopped")
 	}
 }
 
@@ -243,8 +264,15 @@ func TestStopADBBridge_NotRunning_Idempotent(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"not_running","serial":"ghost"}`))
 	})
 	c, _ := newTestServer(t, h)
-	if err := c.StopADBBridge(context.Background(), "ghost"); err != nil {
+	// Idempotent contract: a not-running bridge surfaces as a nil error
+	// with status="not_running" — discriminator added in P2b-S5 for MCP
+	// tools that need to report state to LLMs.
+	status, err := c.StopADBBridge(context.Background(), "ghost")
+	if err != nil {
 		t.Errorf("idempotent not_running should not error, got: %v", err)
+	}
+	if status != "not_running" {
+		t.Errorf("status = %q, want %q (discriminator pass-through)", status, "not_running")
 	}
 }
 
@@ -252,8 +280,12 @@ func TestStopADBBridge_EmptySerial(t *testing.T) {
 	c, _ := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("hub should not be called when serial is empty")
 	}))
-	if err := c.StopADBBridge(context.Background(), ""); err == nil {
+	status, err := c.StopADBBridge(context.Background(), "")
+	if err == nil {
 		t.Fatal("expected error for empty serial")
+	}
+	if status != "" {
+		t.Errorf("status on error = %q, want empty", status)
 	}
 }
 
@@ -262,9 +294,12 @@ func TestStopADBBridge_Unauthorized(t *testing.T) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	})
 	c, _ := newTestServer(t, h)
-	err := c.StopADBBridge(context.Background(), "x")
+	status, err := c.StopADBBridge(context.Background(), "x")
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Errorf("expected ErrUnauthorized, got %v", err)
+	}
+	if status != "" {
+		t.Errorf("status on auth-fail = %q, want empty", status)
 	}
 }
 
@@ -279,7 +314,8 @@ func TestStopADBBridge_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- c.StopADBBridge(ctx, "emu")
+		_, err := c.StopADBBridge(ctx, "emu")
+		errCh <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
