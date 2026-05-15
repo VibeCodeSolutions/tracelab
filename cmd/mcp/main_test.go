@@ -41,11 +41,11 @@ func TestBuildServerConstructs(t *testing.T) {
 	}
 }
 
-// TestServerRegistersExpectedTools asserts the real tools (sessions_list
-// from S3, tail_since from S4, adb_devices/adb_start/adb_stop from S5)
-// and the remaining stub placeholder (crashes) are present in the
-// server's tool registry. Sorted-name comparison gives deterministic
-// failure messages when a tool moves in or out.
+// TestServerRegistersExpectedTools asserts the six real tools are
+// present in the server's tool registry: sessions_list (S3), tail_since
+// (S4), adb_devices/adb_start/adb_stop (S5), crashes_list (S6). All
+// four S1 stubs have retired. Sorted-name comparison gives
+// deterministic failure messages when a tool moves in or out.
 func TestServerRegistersExpectedTools(t *testing.T) {
 	t.Parallel()
 	c := newTestHubServer(t, http.NotFoundHandler())
@@ -53,9 +53,10 @@ func TestServerRegistersExpectedTools(t *testing.T) {
 	tools := s.ListTools()
 
 	// Sorted alphabetically: adb_devices, adb_start, adb_stop,
-	// crashes_stub, sessions_list, tail_since. sessions_stub retired
-	// in S3, tail_stub in S4, adb_stub in this commit (S5).
-	want := []string{"adb_devices", "adb_start", "adb_stop", "crashes_stub", "sessions_list", "tail_since"}
+	// crashes_list, sessions_list, tail_since. sessions_stub retired
+	// in S3, tail_stub in S4, adb_stub in S5, crashes_stub in this
+	// commit (S6) — Phase 2b stub-set is empty.
+	want := []string{"adb_devices", "adb_start", "adb_stop", "crashes_list", "sessions_list", "tail_since"}
 	got := make([]string, 0, len(tools))
 	for name := range tools {
 		got = append(got, name)
@@ -87,11 +88,15 @@ func TestToolDescriptionsPresent(t *testing.T) {
 	}
 }
 
-// TestStubHandlerReturnsNotImplemented asserts the remaining placeholder
-// handler returns a structured "not implemented" error pointing at
-// ADR-007. sessions_stub retired in S3 (sessions_list tests); tail_stub
-// in S4 (tail_since tests in tail_test.go); adb_stub in S5 (adb_devices/
-// _start/_stop tests in adb_test.go). The remaining stub is crashes.
+// TestStubHandlerReturnsNotImplemented asserts the (now unused) stub
+// handler still returns a structured "not implemented" error pointing
+// at ADR-007. All four S1 placeholders have retired (sessions_stub in
+// S3, tail_stub in S4, adb_stub in S5, crashes_stub in S6) and
+// stubTools is empty as of P2b-S6 — the handler is kept as a
+// ready-to-extend pattern for any future tool that lands as a
+// placeholder before its real implementation. This test pins the
+// pattern so a future reintroduction does not silently lose the
+// ADR-007 marker.
 func TestStubHandlerReturnsNotImplemented(t *testing.T) {
 	t.Parallel()
 	res, err := stubHandler(context.Background(), mcp.CallToolRequest{})

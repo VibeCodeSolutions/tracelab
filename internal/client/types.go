@@ -46,6 +46,36 @@ type Session struct {
 	EndedAt   *int64 `json:"ended_at,omitempty"`
 }
 
+// CrashEvent is the wire shape returned by GET /crashes (Phase 2b S6,
+// ADR-009). Mirrors store.CrashRow but lives here so the client package
+// owns its own public DTO (no import of internal/store).
+//
+// Field semantics:
+//
+//   - ID is the SQLite ROWID of the crash row, useful as an opaque
+//     pin for future per-crash follow-up. `omitempty` keeps payloads
+//     compact when the consumer does not rely on it.
+//   - SessionID echoes the requested session. `omitempty` mirrors the
+//     Event DTO so consumers that already know the session can ignore
+//     the field.
+//   - TS is unix-nanoseconds (same envelope as Event.TS), set to the
+//     most-recent occurrence per the dedup-upsert in
+//     store.UpsertCrash.
+//   - Fingerprint is the SHA256-top-3-frames hash from P1-S5 (hex-16).
+//   - Stacktrace is the raw stack body as captured at first detection
+//     (subsequent dedup hits do not overwrite the body — first insert
+//     wins).
+//   - Count is the dedup counter: occurrences of the same
+//     (session_id, fingerprint) pair collapsed into one row.
+type CrashEvent struct {
+	ID          int64  `json:"id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	TS          int64  `json:"ts"`
+	Fingerprint string `json:"fingerprint"`
+	Stacktrace  string `json:"stacktrace"`
+	Count       int    `json:"count"`
+}
+
 // --- internal wire types (not exported) ---
 
 type sessionStartReqWire struct {
@@ -101,4 +131,11 @@ type eventsSinceEventWire struct {
 type eventsSinceRespWire struct {
 	Events       []eventsSinceEventWire `json:"events"`
 	NextSinceSeq int64                  `json:"next_since_seq"`
+}
+
+// crashesListRespWire is the on-wire shape of the /crashes response.
+// Mirrors internal/http.listCrashesResp; kept here so the client owns
+// its own decoder type (no import of internal/http).
+type crashesListRespWire struct {
+	Crashes []CrashEvent `json:"crashes"`
 }

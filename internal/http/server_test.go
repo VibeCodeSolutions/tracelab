@@ -90,6 +90,7 @@ func TestAuthRejected(t *testing.T) {
 		{http.MethodPost, "/ingest", map[string]any{"session_id": "x", "events": []any{}}},
 		{http.MethodGet, "/sessions", nil},
 		{http.MethodGet, "/events?session=x", nil},
+		{http.MethodGet, "/crashes?session=x", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.method+c.path+"/no-token", func(t *testing.T) {

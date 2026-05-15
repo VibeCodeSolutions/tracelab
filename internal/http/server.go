@@ -111,6 +111,12 @@ func New(st *store.Store, cfg Config) http.Handler {
 			// group — same envelope as the other JSON read endpoints.
 			tr.Get("/events", h.listEvents)
 
+			// /crashes serves the session-scoped crash digest for
+			// Phase-2b S6 (ADR-009). Newest-first list read (not a
+			// forward cursor); shares the bearer + 30s-timeout
+			// envelope with /events and /sessions.
+			tr.Get("/crashes", h.listCrashes)
+
 			// /adb/* routes — additive in S5 (ADR-004 Option B).
 			// Registered inside the same timeout-bounded group as the
 			// other JSON endpoints: GET /adb/devices shells out to

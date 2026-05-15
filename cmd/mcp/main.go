@@ -11,14 +11,24 @@
 //   - S4:            tail_since is the second real tool — opaque int64
 //     cursor against the new GET /events hub endpoint
 //     (ADR-008), JSON-encoded {events, next_since_seq}.
-//   - S5 (current):  adb_devices / adb_start / adb_stop — three real
+//   - S5:            adb_devices / adb_start / adb_stop — three real
 //     tools wrapping the existing hub /adb/* endpoints from
 //     ADR-004 Option B. Pure MCP-layer wiring; the client
 //     signature was extended additively to pass through the
 //     hub's idempotency discriminator (status field).
+//   - S6 (current):  crashes_list is the sixth real tool and the last
+//     before Phase-2b closure. Wraps the new GET /crashes
+//     hub endpoint (ADR-009); newest-first session-scoped
+//     crash digest with limit cap. Store.CrashesBySession
+//     gained an additive `limit int` parameter — same
+//     additive-widening pattern S5 applied to the ADB
+//     status discriminator.
 //
-// Stubs still in place: crashes_stub. Retires in S6 (pending hub-side
-// /crashes endpoint shape — ADR-007 S6 risk, Admin-confirm pending).
+// Stubs retired: all four S1 placeholders have moved out into their
+// own real-tool files (sessions_list / tail_since / adb_* / crashes_list).
+// stubTools is now empty; the stub registration loop in buildServer is
+// a documented no-op kept for clean reintroduction if a future tool
+// arrives as a placeholder.
 //
 // Bearer-auth wiring (per ADR-007):
 //
@@ -66,8 +76,10 @@ const serverName = "tracelab-mcp"
 const hubTimeout = 30 * time.Second
 
 // stubNotImplemented is the canonical error message every remaining
-// placeholder handler returns. Once tail/crashes/adb land (S4-S6) this
-// constant and the matching stubTools entries will retire.
+// placeholder handler returns. All P2b stubs have retired (S3-S6);
+// the constant + stubHandler + stubTools slice are kept as a tiny,
+// ready-to-extend registration pattern for any future placeholder
+// arriving before its real implementation.
 const stubNotImplemented = "not implemented yet — placeholder stub, see docs/ARCH.md ADR-007 (final tool surface decided in Phase 2b S2)"
 
 // stubTool describes one placeholder tool.
@@ -76,16 +88,12 @@ type stubTool struct {
 	description string
 }
 
-// stubTools is the registration source of truth for the remaining
-// placeholders. sessions_list (S3), tail_since (S4), and the adb_*
-// trio (S5) have moved out into their own files; only crashes remains
-// as a stub.
-var stubTools = []stubTool{
-	{
-		name:        "crashes_stub",
-		description: "Placeholder for the crashes tool. Requires hub-side /crashes endpoint (ADR-007 S6 risk, Admin-confirm pending).",
-	},
-}
+// stubTools is the registration source of truth for placeholders.
+// Empty as of P2b-S6: sessions_list (S3), tail_since (S4), adb_*
+// (S5), and crashes_list (S6) have all moved out into their own
+// real-tool files. Slice stays declared so a future tool can land as
+// a stub first without re-introducing the type and the AddTool loop.
+var stubTools = []stubTool{}
 
 // stubHandler returns a uniform "not implemented" error for every
 // remaining placeholder. Context-less and request-less on purpose: the
@@ -148,9 +156,12 @@ func buildServer(hubClient *client.Client) *server.MCPServer {
 		newADBDevicesTool(hubClient),
 		newADBStartTool(hubClient),
 		newADBStopTool(hubClient),
+		newCrashesListTool(hubClient),
 	)
 
-	// Remaining stubs (replaced in S6 — crashes pending Hub-Schema).
+	// Stub registration loop — empty as of P2b-S6 (all four S1
+	// placeholders retired). Kept for cheap reintroduction if a
+	// future tool lands as a stub before its real implementation.
 	for _, st := range stubTools {
 		s.AddTool(
 			mcp.NewTool(st.name, mcp.WithDescription(st.description)),

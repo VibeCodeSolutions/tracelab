@@ -314,6 +314,84 @@ func (h *handlers) listEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// crashesDefaultLimit / crashesMaxLimit cap GET /crashes response sizes
+// (ADR-009 Decision 2). Same envelope as /events (ADR-008 Decision 4):
+// 500 default trades round-trip count against MCP-payload size; 5000
+// cap keeps a single stdio-MCP frame well under transport buffer limits.
+const (
+	crashesDefaultLimit = 500
+	crashesMaxLimit     = 5000
+)
+
+// crashView is the wire shape of one /crashes response row. Mirrors
+// internal/client.CrashEvent (ADR-009 Decision 3) — kept separate from
+// store.CrashRow so the HTTP layer owns its own serialisation surface
+// without exposing store internals.
+type crashView struct {
+	ID          int64  `json:"id"`
+	SessionID   string `json:"session_id"`
+	TS          int64  `json:"ts"`
+	Fingerprint string `json:"fingerprint"`
+	Stacktrace  string `json:"stacktrace"`
+	Count       int    `json:"count"`
+}
+
+type listCrashesResp struct {
+	Crashes []crashView `json:"crashes"`
+}
+
+// listCrashes serves GET /crashes?session=<id>&limit=<n>.
+// See ADR-009: newest-first list-read (not a forward cursor), additive
+// reuse of store.CrashesBySession with a limit parameter, no schema
+// migration (existing idx_crashes_session_ts covers the query).
+//
+// Auth is enforced by the bearer-protected sub-router in server.go.
+// Unknown session id is NOT a 404 — it returns crashes:[] (the endpoint
+// is a list-read, not a session-existence probe; existence is
+// discoverable via /sessions).
+func (h *handlers) listCrashes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	sessionID := q.Get("session")
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session required"})
+		return
+	}
+
+	limit := crashesDefaultLimit
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid limit: " + raw,
+			})
+			return
+		}
+		if n > crashesMaxLimit {
+			n = crashesMaxLimit
+		}
+		limit = n
+	}
+
+	crashes, err := h.store.CrashesBySession(r.Context(), sessionID, limit)
+	if err != nil {
+		h.internalError(w, r, "list crashes failed", err)
+		return
+	}
+
+	out := make([]crashView, len(crashes))
+	for i, c := range crashes {
+		out[i] = crashView{
+			ID:          c.ID,
+			SessionID:   c.SessionID,
+			TS:          c.TS.UnixNano(),
+			Fingerprint: c.Fingerprint,
+			Stacktrace:  c.Stacktrace,
+			Count:       c.Count,
+		}
+	}
+	writeJSON(w, http.StatusOK, listCrashesResp{Crashes: out})
+}
+
 type sessionView struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`
