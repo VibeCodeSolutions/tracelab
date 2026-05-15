@@ -1,13 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-codereife (alle 6 Sub-Sprints QS-grün, 0 Findings über gesamte Phase; Phase-2b-Sammel-Gate eröffnungsreif; FF-Merge → main wartet auf Admin-Confirm)
+status: phase-2b-gemerged (FF-Merge feat/phase-2-mcp → main bei cb249bd, Branch lokal+remote gelöscht, Phase 2b vollständig closure)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-005
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#023 P2b-S6 QS-grün — Phase-2b strukturell vollständig"
+phase-2b-merge-commit: cb249bd
+aktiver-auftrag: "—"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +23,28 @@ aktiver-auftrag: "#023 P2b-S6 QS-grün — Phase-2b strukturell vollständig"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #024 — Tracelab Phase-2b-Closure — FF-Merge + Branch-Cleanup + State-Sync
+
+- **Timestamp:** 2026-05-15T (Eröffnung + Ausführung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („beides" — P2a-Drift-Klärung + P2b-Closure als Tail-Bündel) → Chakotay → belanna
+- **Auftrag:** Phase-2b-Sammel-Gate-Closure. FF-Merge `feat/phase-2-mcp` → `main` mit anschließendem Branch-Cleanup (lokal + remote) und State-Sync. Drift-Kontext: Chakotays initialer Status-Check zeigte Vault-ST.md auf veraltetem „P2a wartet auf Merge"-Stand, tatsächlich war P2a bereits gemerged (`bdc3a0c`) — effektiver Restscope ausschließlich P2b-Closure.
+- **DoD:**
+  1. ✅ FF-Merge `feat/phase-2-mcp` → `main` (Fast-Forward, kein Merge-Commit)
+  2. ✅ Push `main` → `origin/main`
+  3. ✅ Branch-Cleanup: lokal (`-D` da `feat/phase-2-mcp` ahead of `origin/feat/phase-2-mcp` durch Sammel-Gate-Commit `cb249bd`, der nie auf Branch gepusht wurde — Admin-Pauschal-Confirm deckt `-D`) UND remote (`git push origin --delete`)
+  4. ✅ State-Sync-Commit auf `main` mit Frontmatter-Update (`phase-2b-merge-commit: cb249bd`, status auf „phase-2b-gemerged", aktiver-auftrag auf „—") + AUFTRAG #024 als Closure-Eintrag
+  5. ✅ Push final-state-commit
+  6. ✅ Verifikation: `git branch -a` zeigt nur `main` + `origin/main`, kein verwaister Feature-Branch
+- **Mandat:** Lead-Direktarbeit (Klasse ⚪ continuation/trivial). Kein Worker-Spawn — alle Operationen sind explizit unter Belanna-Lead-Autonomie gelistet (FF-Merge mit `--ff-only`, Branch-Cleanup nach Merge, WORKLOG-Updates, Standard-Push). Admin-Pauschal-Confirm deckt die Force-relevante `-D`-Operation.
+- **Pre-Check (vor FF-Merge):** `git merge-base feat/phase-2-mcp main` = `9536b12` = `git rev-parse main` → FF-Linearität bestätigt (ANCESTOR_OK).
+- **Status:** ✅ Abgeschlossen
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung + Ausführung) — belanna: Pre-Check linear (`main@9536b12` ≤ `feat/phase-2-mcp@cb249bd`). `git checkout main && git merge --ff-only feat/phase-2-mcp` → 32 Files, +5121/-50 Lines fast-forward von `9536b12` auf `cb249bd`. `git push origin main` → `9536b12..cb249bd  main -> main` clean. `git branch -d` schlug fehl (Branch ahead of `refs/remotes/origin/feat/phase-2-mcp`, weil Sammel-Gate-Commit `cb249bd` nur lokal war + dann direkt nach main gemerged statt zur Feature-Branch gepusht) → `git branch -D feat/phase-2-mcp` (Force-Delete unter Admin-Pauschal-Confirm). `git push origin --delete feat/phase-2-mcp` → `[deleted] feat/phase-2-mcp` remote sauber. Verifikation: `git branch -a` zeigt `main` + `origin/HEAD` + `origin/main`, kein Feature-Branch mehr. `git log --oneline -5` Tip: `cb249bd chore(qs): findings-gate #023 — freigabe` → `496efeb feat(mcp): P2b-S6 crashes_list-Tool` → `54b81a6 feat(store): P2b-S6 CrashesBySession limit param + ADR-009` → `9d31461 docs(worklog): #023 P2b-S6 eröffnet` → `c88ec9d chore(qs): findings-gate #022 — freigabe`. Tracelab Phase 2b damit vollständig auf `main`: 6 Sub-Sprints (S1 surface-cut + S2 ADR-007 + S3 sessions_list + S4 tail_since/ADR-008 + S5 adb-Tools + S6 crashes_list/ADR-009), 4 ADRs Admin-confirmed (007/008/009/010), 6 MCP-Tools live (`adb_devices, adb_start, adb_stop, crashes_list, sessions_list, tail_since`) stub-frei, 0 Findings über die gesamte Phase. State-Sync-Commit als finaler Touch des Auftrags: Frontmatter (status/phase-2b-merge-commit/aktiver-auftrag) + dieser AUFTRAG-#024-Eintrag.
 
 ---
 
