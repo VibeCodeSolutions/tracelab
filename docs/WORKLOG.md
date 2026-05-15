@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S2 confirmed; S3 sessions-Tool startet via Auto-Chain)
+status: phase-2b-laufend (S3 QS grün; Auto-Stop vor S4 — Hub-/events-Endpoint-Schema-Change wartet auf Admin-Confirm)
 last-updated: 2026-05-15
-qs-letzter-lauf: qs-20260515-001
+qs-letzter-lauf: qs-20260515-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#020 P2b-S3 sessions-Tool"
+aktiver-auftrag: "#020 P2b-S3 sessions-Tool QS grün; Auto-Stop vor S4"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -50,9 +50,14 @@ aktiver-auftrag: "#020 P2b-S3 sessions-Tool"
   - Bearer-Token-Plumbing: in `cmd/mcp/main.go` `cliconfig.Resolve()` aufrufen analog cmd/cli, Server startet mit klarer Error-Message bei Token-Miss/CHANGEME
   - Trance-Bruch-Cross-Check-Scope explizit breit: alle Files im Sprint-Touch-Scope inkl. Package-Doc, Const-Blocks, Tool-Description-Strings, Smoke-Test-Doc-Comments (Promotion-Lesson 4× bestätigt)
 - **Auto-Stop S3:** keine zusätzlichen über 5a-Default hinaus (S3 ist pure-MCP-Layer, kein Hub-Touch).
-- **Status:** offen — Routing an belanna folgt (Auto-Chain)
+- **Status:** ✅ QS grün — Findings-Gate freigegeben (qs-20260515-002, 0 Findings). Code committed (`bfda237`) + gepusht. Auto-Stop vor S4 (Hub-/events-Endpoint-Schema-Change) aktiv.
 - **Verlauf:**
   - 2026-05-15T (Eröffnung) — chakotay: Auto-Chain nach S2-Admin-Confirm, S3 routet an belanna.
+  - 2026-05-15T (Delegation) — belanna: Worker-Spawn ballard (Klasse `feature`, analog S1-Konsistenz). Vor-Inspektion: `client.ListSessions(ctx, limit int)` hat keinen `since`-Param → since-Filter MCP-Tool-Handler-side nach DTO-Field `StartedAt int64`. cliconfig-Pattern aus `cmd/cli/sessions.go:84` als Vorbild (`Resolve(Sources{})` mit FlagPath/URL/Token leer für MCP-Server-Start). DTO `Session { ID, Label, StartedAt, EndedAt }` aus `internal/client/types.go:37` — Output `{ sessions: [...] }` ist Array-Wrap des existierenden Slice.
+  - 2026-05-15T (worker-erledigt) — ballard: Implementation in 4 Files (2 neu, 2 mod). `cmd/mcp/sessions.go` (sessions_list-Tool mit mcp-go-Schema-Builder, since-Filter client-side, JSON-encoded TextContent-Output). `cmd/mcp/sessions_test.go` (9 Tests inkl. Registered, Description, Schema-Accepts-4-Variants, WrongTypes-Tolerated-Tripwire, HandlerCallsHub-mit-Bearer-Check, SinceFilter, AuthFail, InvalidSince-fail-fast, EmptyResult-Array-Stability). `cmd/mcp/main.go` (Bearer-Plumbing via cliconfig.Resolve in newServer→buildServer-Split, hubTimeout=30s, log.Fatal bei ErrNoToken/ErrNoURL, stubTools-Slice ohne sessions_stub). `cmd/mcp/main_test.go` (want-Slice `[adb_stub, crashes_stub, sessions_list, tail_stub]`, buildServer-basierte Tests). Repo-weit `go test -race -count=1 ./...` grün (11 Packages), `go vet ./...` clean, `go mod tidy` Diff=0. `make mcp` + `make mcp-windows` clean (Linux ELF + Win PE32+ verifiziert). `git diff main -- internal/ cmd/hub/ cmd/cli/` = 0 Lines (Cross-Check-Scope-Disziplin gehalten). `grep "sessions_stub" cmd/mcp/` zeigt nur Test-Doc-Kommentare (Regression-Guards), keine Registration mehr.
+  - 2026-05-15T (Code-Commit) — belanna: Sanity-Check `go test -race -count=1 ./cmd/mcp/` grün, dann `bfda237 feat(mcp): P2b-S3 sessions_list tool — first real MCP tool` (5 files changed, 631 insertions). Push `feat/phase-2-mcp` zu origin.
+  - 2026-05-15T (QS-Lauf abgeschlossen) — tuvok, qs-20260515-002: Status `freigabe` / Schweregrad `none`. **0 Findings.** Alle 8 DoD-Punkte verifiziert (ADR-007-Konformität, Bearer-Plumbing, since Client-Side mit Unix-Nanosekunden-Einheit, Test-Hermetik via buildServer, Stub-Removal vollständig, Trance-Bruch-Cross-Check 5. erfolgreiche Anwendung). cmd/mcp +9 Tests, repo-weit 11/11 Pakete grün. Tuvok-Empfehlung: Freigabe für Commit + S4 starten — Hub-`/events`-Endpoint-Auto-Stop ist bereits in ADR-007 markiert.
+  - 2026-05-15T (Findings-Gate) — chakotay: **Freigabe.** Strategie/Proportion: 0 Findings auf erstem echten 2b-MCP-Tool (Pure-MCP-Layer, kein Hub-Touch, Pattern-etabliert für S4-S6 via `buildServer`-Hermetik). Routine-Durchwinker. **Cross-Check-Scope-Lesson jetzt 5× bestätigt** (#013-#014-#015-#018-#020) → Promotion-Trigger weit überschritten; T5-Konsolidierung in `30_Wissen/Worker-Brief-Konventionen.md` final als Chakotay-Outro-Schuld bestätigt (folgt nach Phase-2b-Done). **Auto-Stop S4 greift jetzt** — `tail_since` braucht neuen Hub-`/events?session=…&since_seq=…&limit=…`-Endpoint analog 2a-S5/ADR-004-Pattern, Admin-Confirm für Hub-Schema-Change nötig vor Sub-Sprint-Eröffnung.
 
 ---
 
