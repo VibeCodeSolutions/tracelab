@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S3 QS grün; Auto-Stop vor S4 — Hub-/events-Endpoint-Schema-Change wartet auf Admin-Confirm)
+status: phase-2b-laufend (S4 eröffnet — `tail_since`-Tool + Hub-`/events`-Endpoint, Admin-Confirm für Hub-Schema-Change erhalten)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#020 P2b-S3 sessions-Tool QS grün; Auto-Stop vor S4"
+aktiver-auftrag: "#021 P2b-S4 tail_since-Tool + Hub-/events-Endpoint"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,39 @@ aktiver-auftrag: "#020 P2b-S3 sessions-Tool QS grün; Auto-Stop vor S4"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #021 — Tracelab P2b-S4 — `tail_since`-Tool + Hub-`/events`-Endpoint
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna (Admin-Confirm für Hub-Schema-Change erteilt nach #020-Freigabe)
+- **Auftrag:** S4 von Phase 2b — `tail_since`-Tool + neuer Hub-`/events`-Endpoint. Erste Hub-Mutation in 2b, additive Erweiterung analog 2a-S5/ADR-004-Pattern.
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S4)
+  - **ADR-Ref:** ADR-007 (tail-Tool-Shape, Admin-confirmed 2026-05-15) — `tail_since(session, since_seq?, limit?)` → `{ events: Event[], next_since_seq: number }`, Bearer required. **ADR-008 NEU:** Hub-`GET /events?session=…&since_seq=…&limit=…`-Endpoint (Schema-Change, additiv) — analog ADR-004-Pattern, von belanna in S4 zu schreiben vor Code-Touch.
+  - **Branch:** `feat/phase-2-mcp` (aktiv, tip `929dd24`)
+- **DoD S4:**
+  - **ADR-008** in `docs/ARCH.md` vor Code-Touch — dokumentiert Hub-`/events`-Endpoint-Form (Query-Params, Response-Shape, Bearer-Check, seq-Semantik, Considered/Rejected analog ADR-004)
+  - **Hub-Endpoint** `GET /events?session=<id>&since_seq=<n>&limit=<n>` in `cmd/hub/` (bzw. wo die Route-Registry liegt) implementiert. Default-Limit + Max-Limit dokumentiert. Bearer-Auth wie alle anderen Endpoints. Response `{ events: [...], next_since_seq: <n> }`
+  - **Store-Reuse:** `internal/store/` hat bereits Event-Persistenz inkl. `seq` — kein Schema-Change am Store nötig, nur neue Query-Methode (`EventsSince(sessionID string, sinceSeq int64, limit int)` o.ä.). Falls Store-Lücke gefunden → ADR-Note.
+  - **Client-Methode** `internal/client.EventsSince(ctx, session, sinceSeq, limit)` (neu) — Bearer-Plumbing wie existierende Methoden, Unit-Tests via `httptest`-Fake-Hub
+  - **MCP-Tool** `tail_since` in `cmd/mcp/tail.go` (analog `cmd/mcp/sessions.go`-Pattern aus S3) — Input-Schema mit mcp-go-Schema-Builder, Handler ruft `client.EventsSince`, Output `{ events, next_since_seq }` als JSON-encoded TextContent
+  - **Stub-Removal:** `tail_stub` aus `stubTools`-Slice in `cmd/mcp/main.go` raus, `want`-Slice in `main_test.go` aktualisiert (`[adb_stub, crashes_stub, sessions_list, tail_since]`)
+  - **mcp-go-Smoke-Test:** Tool registriert, Schema-Validation (input mit/ohne optional fields), Handler-Test mit `httptest`-Fake-Hub, leerer Result → Array-Stability, `next_since_seq`-Cursor-Korrektheit
+  - **Hub-Endpoint-Test:** Integration-Test gegen reale Store-Layer, Bearer-Auth-Fail-Case, seq-Filter-Korrektheit, Empty-Result-Shape
+  - `go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün
+- **Mandat:**
+  - Belanna entscheidet Worker-Spawn ballard (Hub + Client + MCP-Tool = substantielle Implementation, klar Worker-Klasse `feature` empfohlen) ODER Lead-Direktarbeit
+  - **ADR-008-Skelett vor Code-Touch** (analog wie ADR-004 in 2a-S5 vor Hub-Touch geschrieben wurde) — Considered/Rejected, Query-Param-Form, seq-Semantik
+  - **Cross-Check-Scope:** voll wie #020 — alle Files im Touch-Scope inkl. Package-Doc, Const-Blocks, Tool-Description-Strings, Smoke-Test-Doc-Comments (Lesson 5× bestätigt)
+  - **Reihenfolge-Empfehlung:** (1) ADR-008-Entwurf zur Admin-Sichtung optional, (2) Hub-Endpoint + Store-Query + Hub-Test, (3) Client-Methode + Client-Test, (4) MCP-Tool + Stub-Removal + MCP-Test, (5) repo-weit Tests, Commit pro logischer Einheit ODER Sammel-Commit nach Belanna-Cut
+- **Auto-Stop S4:** keine zusätzlichen über 5a-Default hinaus — Hub-Schema-Change ist mit diesem Auftrag bereits Admin-confirmed. Bei substantieller Lücke in `internal/store` (z.B. seq-Index fehlt) → Eskalation.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Admin-Confirm für Hub-`/events`-Schema-Change erhalten. AUFTRAG #021 eröffnet, S4 routet an belanna mit Hub-Touch-Mandat + ADR-008-Schreibauftrag.
 
 ---
 
