@@ -642,6 +642,229 @@ hub keeps working byte-identically on `/ingest`, `/tail`, `/sessions`,
 pre-S4 hub gets a 404 on `/events` calls — captured cleanly by the
 existing `*HTTPError` non-2xx surface in `internal/client/client.go`.
 
+#### ADR-009: `crashes_list` Hub-`/crashes` endpoint shape (Admin-confirmed 2026-05-15 via #023 briefing)
+
+> **Status:** Admin-confirmed via #023 plan briefing (zweite Hub-Schema-
+> Mutation in Phase 2b, additiv analog ADR-008-Pattern, kein
+> bestehendes Schema/Endpoint berührt).
+
+ADR-007 pinned `crashes_list(session_id, limit?) → { crashes: CrashEvent[] }`
+as the MCP tool shape. ADR-009 fixes the concrete hub-side schema this
+tool calls into. **All decisions in this ADR are additive**: no existing
+endpoint changes shape, no existing column changes, no client-side
+breaking field shifts. Schema-wise, `crashes` is already complete from
+P1-S5 (id, session_id, ts, fingerprint, stacktrace, count) — no
+migration 0003 is required.
+
+##### Decision 1 — Reuse `Store.CrashesBySession` with additive `limit int` parameter
+
+`internal/store/sqlite.go` already has
+`CrashesBySession(ctx, sessionID) ([]CrashRow, error)` from P1-S5, with
+a doc comment explicitly stating "Used by tests and the future /crashes
+API". S6 extends the signature additively to
+`(ctx, sessionID, limit int) ([]CrashRow, error)` to match the
+`limit`-knob exposed by the MCP tool and the HTTP endpoint.
+
+**Default-limit semantics:** `limit <= 0` falls back to a 500 default
+inside the store (same envelope as `EventsSince` from ADR-008). The
+store does **not** cap; the HTTP layer caps at 5000 (Decision 2).
+
+**Why:**
+- One method, one query. A second method (e.g. `CrashesBySessionLimited`)
+  would duplicate the SELECT body for a one-line difference and force
+  every caller to choose between two near-identical APIs.
+- The additive widening is source-compatible with the bare-minimum
+  patch: every existing call site passes `0` (or `..., 0`) and gets
+  identical behaviour to pre-S6 (no implicit cap, but in practice the
+  default 500 fires).
+- The default of 500 mirrors ADR-008 Decision 4 — operators only need
+  to remember one envelope for "an MCP tool reads a session-scoped log
+  table".
+
+**Considered & rejected:**
+- Separate method `CrashesBySessionLimited` — code duplication for
+  zero new capability. The signature mutation is mechanical for the
+  existing 7 test call sites (3 in `internal/store/sqlite_test.go`, 4
+  in `internal/http/ingest_crash_test.go`), all of which are
+  exercising the un-limited semantic that maps to `limit = 0`.
+- Client-side `LIMIT` slicing — bandwidth and DB-time wasted on rows
+  the consumer will discard. For a session with thousands of crashes
+  (unusual but possible if the AUT crashes on every test loop) the
+  hub-side cap is the only safety net.
+
+##### Decision 2 — `GET /crashes?session=<id>&limit=<n>` shape
+
+**Endpoint:** `GET /crashes`, bearer-protected, registered inside the
+existing 30s-timeout sub-group in `internal/http/server.go` (same group
+as `/sessions`, `/ingest`, `/events`, `/adb/*`).
+
+**Query parameters:**
+
+| Param | Required | Type | Default | Cap |
+|---|---|---|---|---|
+| `session` | yes | string | — | — |
+| `limit` | no | int | 500 | 5000 |
+
+**Response (200 OK):**
+
+```json
+{
+  "crashes": [
+    { "id": 17, "session_id": "...", "ts": 1700..., "fingerprint": "...",
+      "stacktrace": "...", "count": 3 }
+  ]
+}
+```
+
+**Ordering:** newest first — `ORDER BY ts DESC, id DESC`. Mirrors the
+existing store-side `CrashesBySession` order. Crashes are typically
+inspected from "most recent first" (e.g. "what just broke?"), so the
+hub returns rows in the same order an interactive debugger expects.
+Unlike `/events`, this is **not** a forward cursor — the operation is
+"list crashes for a session", a single-shot read with an optional cap.
+
+**Error shapes:**
+
+| Status | Cause | Body |
+|---|---|---|
+| 400 | `session` missing | `{"error":"session required"}` |
+| 400 | unparseable `limit` | `{"error":"invalid limit: ..."}` |
+| 401 | missing/wrong bearer | (empty, hub-wide convention) |
+| 500 | store query failure | `{"error":"internal"}` (h.internalError) |
+
+**Limit silent-cap:** values above 5000 are silently clamped to 5000
+(same envelope as `/events`). Negative or zero `limit` is a 400 — the
+operator probably typo'd; failing fast avoids silent default-fallback
+confusion. Unknown session ID returns 200 with `{ "crashes": [] }`
+(consistent with the rest of the read API — crash lookup is not an
+existence probe).
+
+**Considered & rejected:**
+- POST with JSON body — see ADR-008 Decision 2; every read endpoint
+  in the hub is GET + query string for consistency.
+- Cursor pagination (analogous to `/events?since_seq=`) — crashes
+  carry an `events.id`-style monotonic `id` column already, so a
+  forward cursor would be technically feasible. **Rejected** because
+  the consumer use case differs: events are a streaming log (callers
+  poll repeatedly to follow new lines), crashes are a digest (callers
+  fetch once per session to triage failures). Newest-first + `limit`
+  is the matching shape; if a future use case demands cursor-walk
+  through millions of dedup'd crashes per session, the additive
+  `?since_id=` extension is straightforward.
+
+##### Decision 3 — `client.CrashEvent` is a fresh DTO (greenfield)
+
+`internal/client/types.go` grows one new type:
+
+```go
+type CrashEvent struct {
+    ID          int64  `json:"id,omitempty"`
+    SessionID   string `json:"session_id,omitempty"`
+    TS          int64  `json:"ts"`
+    Fingerprint string `json:"fingerprint"`
+    Stacktrace  string `json:"stacktrace"`
+    Count       int    `json:"count"`
+}
+```
+
+**Why fresh DTO:** no existing endpoint in the hub serialises crashes
+(P1-S5 only writes them, no read API existed). S6 is the first
+exposure on the wire, so there is no pre-existing shape to be
+compatible with. `omitempty` on `ID` and `SessionID` mirrors the
+`Event` DTO from ADR-008 — consumers that don't care about the
+server-side identity can ignore both fields, but cursor-style
+extensions (Decision 2's rejected `?since_id=`) remain feasible
+without a breaking change.
+
+**Field semantics:**
+- `ID` is the SQLite ROWID of the crash row. Opaque cursor placeholder
+  for future pagination; today nice-to-have for clients that want to
+  pin a specific crash for follow-up (e.g. fetch the related events
+  around the same `ts`).
+- `TS` is unix-nanoseconds (same envelope as `Event.TS`).
+- `Fingerprint` is the SHA256-top-3-frames hash from P1-S5 (hex-16).
+- `Stacktrace` is the raw stack as stored at first detection.
+- `Count` is the dedup count — the same `(session_id, fingerprint)`
+  bumps `count++` rather than inserting duplicate rows.
+
+**Wire-compatibility statement for S6:** no existing endpoint or
+client type is touched. Pre-S6 clients running against a post-S6 hub
+continue to work byte-identically. Post-S6 clients running against a
+pre-S6 hub get a 404 on `/crashes` calls — captured cleanly by the
+existing `*HTTPError` non-2xx surface.
+
+**Considered & rejected:**
+- Reuse `store.CrashRow` at the client boundary — re-exposes a
+  store-internal struct on the public client surface, breaks the
+  layering rule that `internal/client` owns its own wire types
+  (established in ADR-003). Same anti-pattern that ADR-008 Decision 3
+  rejected for `Event`.
+- Embed the full `crash.DetectResult` (language, normalized frames) —
+  these are detect-time artefacts, not persisted columns. The
+  persisted view is what `/crashes` should surface; richer detail
+  would belong on a per-crash `/crashes/{id}` endpoint, out of scope
+  for S6.
+
+##### Decision 4 — No new index; existing `idx_crashes_session_ts` covers the query
+
+The query is `SELECT ... FROM crashes WHERE session_id = ? ORDER BY
+ts DESC, id DESC LIMIT ?`. Migration `0001_initial.up.sql` already
+declares:
+
+```sql
+CREATE INDEX idx_crashes_session_ts ON crashes(session_id, ts);
+```
+
+This composite index covers:
+- The equality predicate `WHERE session_id = ?` (leading column).
+- The `ORDER BY ts DESC` (trailing column, SQLite walks the B-tree
+  backwards).
+- The `id DESC` tiebreaker, applied per row inside the indexed group.
+
+EXPLAIN QUERY PLAN on the query reads `SEARCH crashes USING INDEX
+idx_crashes_session_ts (session_id=?)` — the cheapest plan SQLite
+has for a session-scoped, ts-ordered scan. **No migration 0003 is
+required.**
+
+A composite `idx_crashes_session_id_ts_id` (adding the `id`
+tiebreaker) would let the planner skip the per-row id-sort inside
+each `(session_id, ts)` group. **It is not worth adding in S6**
+because:
+
+1. Multiple crashes with identical nanosecond `ts` are vanishingly
+   rare in practice (the dedup-upsert mechanism collapses repeats
+   into one row with `count++`); the per-group tiebreaker sort never
+   exceeds a handful of rows.
+2. SQLite indexes cost write-time on every `INSERT`/`UPDATE` (and
+   the crashes table is hit on every `UpsertCrash`); for the
+   measured workload the trade-off tilts negative.
+3. **Tripwire:** if `/crashes` P95 latency drifts past an actionable
+   threshold on a real-world test archive, open ADR-010 +
+   Migration 0003 with measured EXPLAIN and timing evidence.
+
+Same disposition pattern as ADR-008 Decision 4 — additive,
+measurable, defer-until-pressure.
+
+**Considered & rejected:**
+- Add `idx_crashes_session_id_ts_id` proactively — see write-cost
+  argument above; premature optimisation.
+- Drop `idx_crashes_fingerprint` since `/crashes` doesn't use it —
+  out of scope; the index serves the future "find related crashes
+  across sessions" use case and is cheap to keep.
+
+##### Wire compatibility statement
+
+S6 adds one new endpoint (`GET /crashes`), one new public client type
+(`CrashEvent`), one new public client method (`CrashesList`), and
+extends the store-internal `CrashesBySession` signature by one trailing
+parameter (`limit int`). It changes **no existing endpoint, no
+existing column, no existing client method, no existing wire format**.
+A pre-S6 client running against a post-S6 hub keeps working
+byte-identically on `/ingest`, `/tail`, `/sessions`, `/events`,
+`/healthz`, `/session/*`, `/adb/*`. A post-S6 client running against
+a pre-S6 hub gets a 404 on `/crashes` calls — captured cleanly by the
+existing `*HTTPError` non-2xx surface.
+
 ## Phase 2c — Dashboard (placeholder)
 
 ADR pending — **scope and stack to be discussed with Admin before start**

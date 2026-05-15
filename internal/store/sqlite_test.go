@@ -194,7 +194,7 @@ func TestUpsertCrashFirstInsert(t *testing.T) {
 		t.Fatalf("UpsertCrash: %v", err)
 	}
 
-	crashes, err := s.CrashesBySession(ctx, id)
+	crashes, err := s.CrashesBySession(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestUpsertCrashDedup(t *testing.T) {
 		}
 	}
 
-	crashes, err := s.CrashesBySession(ctx, id)
+	crashes, err := s.CrashesBySession(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestUpsertCrashDistinctFingerprints(t *testing.T) {
 	if err := s.UpsertCrash(ctx, id, ts, "fp-b", "trace B"); err != nil {
 		t.Fatalf("UpsertCrash B: %v", err)
 	}
-	crashes, err := s.CrashesBySession(ctx, id)
+	crashes, err := s.CrashesBySession(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -482,6 +482,136 @@ func TestEventsSinceCrossSessionIsolation(t *testing.T) {
 		}
 		if e.Source != "a" {
 			t.Errorf("session A leak by source: %+v", e)
+		}
+	}
+}
+
+// TestCrashesBySessionLimitDefault asserts that limit <= 0 falls back to
+// the 500-row default (mirrors EventsSince and ADR-009 Decision 1). We
+// seed three crashes and pass limit=0 — all three must come back.
+func TestCrashesBySessionLimitDefault(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, "crash-limit-default")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		fp := fmt.Sprintf("fp-default-%d", i)
+		ts := time.Unix(int64(1700000000+i), 0)
+		if err := s.UpsertCrash(ctx, id, ts, fp, "stack "+fp); err != nil {
+			t.Fatalf("UpsertCrash %d: %v", i, err)
+		}
+	}
+	got, err := s.CrashesBySession(ctx, id, 0)
+	if err != nil {
+		t.Fatalf("CrashesBySession: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("limit=0 default: want 3, got %d", len(got))
+	}
+}
+
+// TestCrashesBySessionLimitClamps asserts that a small limit caps the
+// returned slice and that the newest crashes come first (ORDER BY
+// ts DESC, id DESC). Seeds five distinct crashes with strictly
+// increasing ts; limit=2 must return the two newest.
+func TestCrashesBySessionLimitClamps(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, "crash-limit-clamp")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		fp := fmt.Sprintf("fp-clamp-%d", i)
+		ts := time.Unix(int64(1700000000+i), 0)
+		if err := s.UpsertCrash(ctx, id, ts, fp, "stack "+fp); err != nil {
+			t.Fatalf("UpsertCrash %d: %v", i, err)
+		}
+	}
+	got, err := s.CrashesBySession(ctx, id, 2)
+	if err != nil {
+		t.Fatalf("CrashesBySession: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("limit=2: want 2 rows, got %d", len(got))
+	}
+	// Newest first: fp-clamp-4 (ts=...004), then fp-clamp-3.
+	if got[0].Fingerprint != "fp-clamp-4" {
+		t.Errorf("first row fp = %q, want fp-clamp-4", got[0].Fingerprint)
+	}
+	if got[1].Fingerprint != "fp-clamp-3" {
+		t.Errorf("second row fp = %q, want fp-clamp-3", got[1].Fingerprint)
+	}
+}
+
+// TestCrashesBySessionEmptyResult asserts unknown-session and known-but-
+// crash-free session both return an empty slice with a nil error. Mirrors
+// the ADR-009 statement that /crashes is a list-read, not a session
+// existence probe.
+func TestCrashesBySessionEmptyResult(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Unknown session.
+	got, err := s.CrashesBySession(ctx, "ghost-session", 10)
+	if err != nil {
+		t.Fatalf("unknown session: err = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("unknown session: want empty, got %d rows", len(got))
+	}
+
+	// Known but crash-free session.
+	id, err := s.CreateSession(ctx, "crash-free")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	got, err = s.CrashesBySession(ctx, id, 10)
+	if err != nil {
+		t.Fatalf("known empty session: err = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("known empty session: want empty, got %d rows", len(got))
+	}
+}
+
+// TestCrashesBySessionCrossSessionIsolation puts crashes in two sessions
+// and verifies that the query returns only the requested session's
+// rows. Mirror of the EventsSince isolation test.
+func TestCrashesBySessionCrossSessionIsolation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	a, err := s.CreateSession(ctx, "crash-iso-a")
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	b, err := s.CreateSession(ctx, "crash-iso-b")
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	ts := time.Unix(1700000000, 0)
+	if err := s.UpsertCrash(ctx, a, ts, "fp-a-1", "stack a1"); err != nil {
+		t.Fatalf("UpsertCrash a1: %v", err)
+	}
+	if err := s.UpsertCrash(ctx, b, ts, "fp-b-1", "stack b1"); err != nil {
+		t.Fatalf("UpsertCrash b1: %v", err)
+	}
+	if err := s.UpsertCrash(ctx, a, ts.Add(time.Second), "fp-a-2", "stack a2"); err != nil {
+		t.Fatalf("UpsertCrash a2: %v", err)
+	}
+
+	got, err := s.CrashesBySession(ctx, a, 100)
+	if err != nil {
+		t.Fatalf("CrashesBySession A: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("session A: want 2 crashes, got %d", len(got))
+	}
+	for _, c := range got {
+		if c.SessionID != a {
+			t.Errorf("session A leak: got crash with session_id=%q", c.SessionID)
 		}
 	}
 }

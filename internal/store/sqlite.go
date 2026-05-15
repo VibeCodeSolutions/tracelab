@@ -443,15 +443,29 @@ type CrashRow struct {
 	Count       int
 }
 
-// CrashesBySession returns all crashes for a session, newest first.
-// Used by tests and the future /crashes API.
-func (s *Store) CrashesBySession(ctx context.Context, sessionID string) ([]CrashRow, error) {
+// CrashesBySession returns up to limit crashes for the given session,
+// newest first (ORDER BY ts DESC, id DESC). Backs both the existing
+// crash-detection tests and the hub's GET /crashes endpoint (ADR-009,
+// Phase 2b S6).
+//
+// limit <= 0 falls back to a 500 default (the same default the HTTP
+// handler applies). A higher limit is the caller's responsibility — the
+// store does not cap; the HTTP layer caps at 5000 (see ADR-009).
+//
+// Empty/unknown session ID returns an empty slice with a nil error:
+// /crashes is a list-read, not a session-existence probe (existence is
+// discoverable via /sessions).
+func (s *Store) CrashesBySession(ctx context.Context, sessionID string, limit int) ([]CrashRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, session_id, ts, fingerprint, stacktrace, count
 		FROM crashes
 		WHERE session_id = ?
 		ORDER BY ts DESC, id DESC
-	`, sessionID)
+		LIMIT ?
+	`, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: crashes by session: %w", err)
 	}

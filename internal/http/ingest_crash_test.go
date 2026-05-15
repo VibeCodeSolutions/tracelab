@@ -43,7 +43,7 @@ func TestIngestStacktraceCreatesCrashRow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID)
+	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestIngestNoStacktraceCreatesNoCrashRow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID)
+	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestIngestStacktraceDedupCounter(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID)
+	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestIngestStacktraceAfterSessionEndStillRecorded(t *testing.T) {
 
 	// Crash should still be recorded.
 	var crashes []store.CrashRow
-	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID)
+	crashes, err := st.CrashesBySession(t.Context(), startBody.SessionID, 0)
 	if err != nil {
 		t.Fatalf("CrashesBySession: %v", err)
 	}
