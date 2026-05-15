@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S2 Tool-Schema-Surface-Cut — belanna-Ausarbeitung läuft)
+status: phase-2b-laufend (S2 confirmed; S3 sessions-Tool startet via Auto-Chain)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#019 P2b-S2 Tool-Schema-Surface-Cut (belanna-Ausarbeitung)"
+aktiver-auftrag: "#020 P2b-S3 sessions-Tool"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,37 @@ aktiver-auftrag: "#019 P2b-S2 Tool-Schema-Surface-Cut (belanna-Ausarbeitung)"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #020 — Tracelab P2b-S3 — `sessions_list`-Tool
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard (Auto-Chain nach S2-Approval)
+- **Auftrag:** S3 von Phase 2b — erstes echtes MCP-Tool implementieren. `sessions_list`-Tool im `cmd/mcp/`, reuse `internal/client.ListSessions` 1:1. Kein Hub-Schema-Change.
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S3)
+  - **ADR-Ref:** ADR-007 (Admin-confirmed 2026-05-15) — `sessions_list` Input `{ limit?: number, since?: string }`, Output `{ sessions: Session[] }`, Bearer required, Hub-Endpoint `GET /sessions` (existing)
+  - **Branch:** `feat/phase-2-mcp` (bereits aktiv, tip nach Sync-Commit)
+- **DoD S3:**
+  - `sessions_list`-Tool ersetzt den `sessions_stub` in `cmd/mcp/main.go` (bzw. wird in `cmd/mcp/sessions.go` ausgelagert analog `cmd/cli/sessions.go`-Pattern)
+  - Input-Schema `{ limit?, since? }` korrekt registriert mit mcp-go-Schema-Builder
+  - Handler ruft `internal/client.ListSessions(ctx, limit)` (existing) auf, `since`-Filter client-side falls Hub-Endpoint kein `since` unterstützt (verifizieren)
+  - Output-Shape `{ sessions: [...] }` JSON-konform (gleiche Session-DTO wie CLI nutzt)
+  - Bearer-Auth-Strategie aus ADR-007: Token zur Server-Start-Zeit aus `tracelab.toml` via `internal/cliconfig`-Discovery geladen, an `internal/client.New(cfg)` weitergereicht (in `cmd/mcp/main.go` einmalig)
+  - mcp-go-Smoke-Test: Tool ist registriert, Schema-Validation-Test (input mit/ohne optional fields), Handler-Test mit `httptest.Server`-Fake-Hub
+  - `go vet ./...` clean, `go test -race ./...` repo-weit grün
+- **Mandat:**
+  - Belanna entscheidet Worker-Spawn ballard (substantielle Implementation, neue Code-Module) ODER Lead-Direktarbeit (falls eng — ist erstes echtes Tool, Pattern wird etabliert für S4-S6, Worker-Spawn empfohlen)
+  - Stub-Removal des `sessions_stub` aus dem `stubTools`-Slice in `cmd/mcp/main.go` Teil dieses Sub-Sprints
+  - Bearer-Token-Plumbing: in `cmd/mcp/main.go` `cliconfig.Resolve()` aufrufen analog cmd/cli, Server startet mit klarer Error-Message bei Token-Miss/CHANGEME
+  - Trance-Bruch-Cross-Check-Scope explizit breit: alle Files im Sprint-Touch-Scope inkl. Package-Doc, Const-Blocks, Tool-Description-Strings, Smoke-Test-Doc-Comments (Promotion-Lesson 4× bestätigt)
+- **Auto-Stop S3:** keine zusätzlichen über 5a-Default hinaus (S3 ist pure-MCP-Layer, kein Hub-Touch).
+- **Status:** offen — Routing an belanna folgt (Auto-Chain)
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Auto-Chain nach S2-Admin-Confirm, S3 routet an belanna.
 
 ---
 
@@ -52,9 +83,11 @@ aktiver-auftrag: "#019 P2b-S2 Tool-Schema-Surface-Cut (belanna-Ausarbeitung)"
 - **Auto-Stop-Trigger zusätzlich:**
   - Admin-Confirm auf Vorschlag ist Auto-Stop (S2 ist explizit Auto-Stop laut Plan-Briefing)
   - Falls mcp-go v0.45.0 keinen tragfähigen Mechanismus für `tail`-Streaming bietet → Lib-Eignungs-Bruch → Eskalation
-- **Status:** offen — belanna-Vorschlag in Arbeit
+- **Status:** ✅ erledigt — ADR-007 Admin-confirmed 2026-05-15, alle Sub-Entscheidungen durchgewunken.
 - **Verlauf:**
   - 2026-05-15T (Eröffnung) — chakotay: AUFTRAG eröffnet nach Admin-„ja belanna soll ausarbeiten". S2-Auto-Stop-Pause wird durch Admin-Confirm auf belanna-Vorschlag aufgehoben.
+  - 2026-05-15T (Vorschlag) — belanna: ADR-007 voll ausgearbeitet im Working-Tree (`docs/ARCH.md`, Phase-2b-Sektion). 3 Sub-Entscheidungen: (1) `<verb>_<noun>` ohne Prefix; (2) `tail_since` Polling-Tool mit Cursor wegen mcp-go-v0.45.0-Streaming-Handler-Gap; (3) Bearer-Token zur Server-Start-Zeit via shared `cliconfig` (5-Stufen-Discovery). Tool-Tabelle (6 Tools): `sessions_list` / `tail_since` / `adb_devices` / `adb_start` / `adb_stop` / `crashes_list`. **Implikation:** 2 Auto-Stops in Phase 2b (S4 tail braucht zusätzlichen `/events`-Hub-Endpoint analog ADR-004-Pattern, S6 crashes wie bekannt).
+  - 2026-05-15T (Admin-Confirm) — chakotay: Admin-„y" auf alle 3 Sub-Entscheidungen + 6-Tools-Tabelle, keine Korrekturen. ADR-007-Status-Header auf „Admin-confirmed 2026-05-15" hochgezogen. S3 (`sessions_list`-Tool) startet via Auto-Chain — kein Hub-Schema-Change, reuse `client.ListSessions` 1:1.
 
 ---
 

@@ -311,33 +311,124 @@ revisited.
 or a sequence of tool calls returning incremental chunks. Deferred to
 ADR-007 in S2 (explicit Auto-Stop per plan briefing).
 
-#### ADR-007: Tool surface (skeleton — finalised in S2)
+#### ADR-007: Tool surface (Admin-confirmed 2026-05-15)
 
-The MCP server exposes four tools, mirroring the CLI sub-commands so that
-Claude Code and the human operator drive Tracelab through the same mental
-model. Naming, exact signatures, and the tool-vs-resource decision for
-`tail` are an explicit Auto-Stop in Sub-Sprint S2.
+> **Status:** Admin-confirmed 2026-05-15 (alle drei Sub-Entscheidungen
+> + 6-Tools-Tabelle ohne Korrekturen durchgewinkt).
 
-- **`sessions`** — list + get-by-id. Reuses `internal/client.ListSessions`.
-  No hub-side change.
-- **`tail`** — live event stream for a session (or all sessions). Reuses
-  `internal/client.Tail` (WebSocket). MCP-side shape (single streaming
-  tool call vs. resource subscription) is the S2 decision.
-- **`adb`** — devices / start / stop. Reuses the `/adb/*` HTTP surface
-  established in Phase 2a S5 (ADR-004 Option B). No hub-side change.
-- **`crashes`** — list crash events for a session. **⚠ S6 risk:** the hub
-  has no `/crashes` HTTP endpoint today (verified 2026-05-15 by `grep -rn
-  "/crashes" internal/http/`; the `crashes` table exists in `internal/
-  store/`, including migrations 0001 + 0002, and `internal/store/sqlite.go`
-  line 397 explicitly documents the gap with `// Used by tests and the
-  future /crashes API.`). S6 therefore needs an additive Hub-Schema-Change
-  (new HTTP endpoint reading from the existing store) — analogous to the
-  Phase-2a S5 / ADR-004 pattern. This is a registered Auto-Stop trigger in
-  the Phase-2b plan briefing; Admin-confirm is required before S6 starts.
+The MCP server exposes a tool set that mirrors the CLI consumption
+patterns, with two pragmatic adjustments for the MCP transport: `tail`
+becomes a **polling tool** rather than a streaming subscription, and
+`crashes` is folded into Phase 2b via the same additive-hub-endpoint
+pattern used in Phase 2a S5 (ADR-004 Option B).
 
-Tool naming convention, auth strategy (Bearer from `tracelab.toml` via
-shared `internal/cliconfig/`), and per-tool input/output schemas are
-written into this ADR during S2.
+**Three sub-decisions:**
+
+##### Tool naming — `<verb>_<noun>` without `tracelab_` prefix
+
+**Decision:** Lowercase snake_case `<verb>_<noun>`. Examples:
+`sessions_list`, `tail_since`, `adb_devices`, `crashes_list`.
+
+**Why:** Established MCP-ecosystem convention. The official MCP server
+examples (filesystem, github, slack) all expose unprefixed tool names —
+the server-side name handles namespacing on the consumer side, so a
+`tracelab_` prefix would duplicate that. Claude Code disambiguates by
+server identity (`tracelab-mcp.sessions_list`), not by tool-name
+prefix, so the prefix would just make every tool call longer without
+adding information.
+
+**Considered & rejected:**
+- `tracelab_<verb>_<noun>` — redundant (see above).
+- `<noun>.<verb>` (dot notation, e.g. `sessions.list`) — not idiomatic
+  in MCP and not supported by mcp-go's tool name validator (snake_case
+  is the de-facto rule).
+
+##### `tail` shape — polling tool with cursor (Option C)
+
+**Decision:** `tail_since(session, since_seq?, limit?)` returns
+`{ events: Event[], next_since_seq: number }`. Claude Code calls it
+repeatedly with the previous `next_since_seq` to walk the event log
+forward in time.
+
+**Why:** mcp-go v0.45.0 does **not** support either of the two
+streaming alternatives in a load-bearing way:
+
+- Streaming tool content (partial-result protocol) — not in v0.45.0.
+  Only `ProgressNotification` exists, which is an out-of-band progress
+  signal for long-running tools, not a content-streaming channel.
+- Resource subscription (`resources/subscribe` +
+  `notifications/resources/updated`) — the types are defined in
+  `mcp/types.go`, and the server advertises `Subscribe: true` if its
+  capability flag is set, but `server/server.go` v0.45.0 has **no
+  `handleSubscribe` handler** for the request. The plumbing for
+  client-driven subscription is not wired through. Treating the lib
+  as if it were means building on a wire protocol that the server
+  cannot honour, which is exactly the kind of fragile coupling we
+  avoid.
+
+Polling with a cursor is also the better match for MCP consumers in
+practice: Claude Code runs one stateless tool call per conversation
+frame, so it does not need a long-lived WebSocket — it needs "give me
+everything since seq=X", which is what `tail_since` answers in one
+round trip.
+
+**Considered & rejected:**
+- (a) Streaming tool call — see above, no v0.45.0 mechanism.
+- (b) Resource subscription — handler gap in v0.45.0, would not
+  actually deliver notifications. Revisit if/when mcp-go ships the
+  subscribe handler (post-v0.50.0 candidate).
+
+##### Auth — server-start-time bearer load via `internal/cliconfig/`
+
+**Decision:** On server start, the MCP server resolves
+`tracelab.toml` through the same 5-step discovery as the CLI (ADR-002),
+extracts `[auth].token`, and constructs an `internal/client.Client`
+with that bearer. The token is **not** re-read per tool call. If the
+token is missing or equals the literal `"CHANGEME"`, the server
+refuses to start with a clear error message naming the discovery
+order and the file it last looked at.
+
+**Why:** The bearer is a deployment-time secret, not a per-call
+secret — re-loading on every tool call would just burn syscalls
+without buying rotation safety (the daemon restart is the rotation
+trigger anyway). Mirroring the CLI's discovery path keeps the
+configuration story single-sourced (ADR-002).
+
+**Considered & rejected:**
+- On-demand token load per tool call — over-engineering, no rotation
+  scenario justifies it; the cost is per-call file I/O and noisier
+  error surfaces.
+- Token via MCP client init parameter — would force Claude Code (or
+  whoever drives the MCP server) to know the bearer, defeating the
+  point of `tracelab.toml` as the single config source.
+
+##### Per-tool surface
+
+| Tool | Input | Output (top-level shape) | Hub endpoint / Client method | Bearer | Hub-Schema-Change |
+|---|---|---|---|---|---|
+| `sessions_list` | `{ limit?: number, since?: string }` | `{ sessions: Session[] }` | `GET /sessions` / `client.ListSessions` (existing) | yes | **no** |
+| `tail_since` | `{ session: string, since_seq?: number, limit?: number }` | `{ events: Event[], next_since_seq: number }` | `GET /events?session=…&since_seq=…&limit=…` (**new, S4**) / `client.EventsSince` (**new, S4**) | yes | **YES — Auto-Stop before S4** |
+| `adb_devices` | `{}` | `{ devices: ADBDevice[] }` | `GET /adb/devices` / `client.ADBDevices` (existing) | yes | no |
+| `adb_start` | `{ device_serial: string, tag_filter?: string }` | `{ status: "started" \| "already_running" }` | `POST /adb/start` / `client.ADBStart` (existing) | yes | no |
+| `adb_stop` | `{ device_serial: string }` | `{ status: "stopped" \| "not_running" }` | `POST /adb/stop` / `client.ADBStop` (existing) | yes | no |
+| `crashes_list` | `{ session_id: string, limit?: number }` | `{ crashes: CrashEvent[] }` | `GET /crashes?session=…&limit=…` (**new, S6**) / `client.CrashesList` (**new, S6**) | yes | **YES — Auto-Stop before S6** |
+
+**Two Auto-Stops in Phase 2b now confirmed:**
+- **S4 (`tail_since`):** Hub needs `GET /events?session=…&since_seq=…&limit=…`
+  endpoint, additive on top of the existing event store. Same pattern
+  as ADR-004 Option B (Phase-2a S5). Admin-confirm required before
+  hub touch.
+- **S6 (`crashes_list`):** Hub needs `GET /crashes?session=…&limit=…`
+  endpoint. `crashes` table + UpsertCrash already exist in
+  `internal/store/`; only the HTTP wrapper is missing
+  (`internal/store/sqlite.go:397` documents the gap explicitly).
+  Admin-confirm required before hub touch (already registered in the
+  plan briefing).
+
+**Sub-sprint impact:** the original S1-S6 cut (S1 skeleton, S2 surface,
+S3 sessions, S4 tail, S5 adb, S6 crashes) holds; S4 and S6 now both
+carry a small additive hub change as their first step. S3 and S5
+remain pure-MCP-layer because they reuse existing client methods 1:1.
 
 ## Phase 2c — Dashboard (placeholder)
 
