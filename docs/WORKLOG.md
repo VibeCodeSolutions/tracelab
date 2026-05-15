@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S1 QS grün; Auto-Stop vor S2 — Tool-Surface-Cut wartet auf Admin-Confirm)
+status: phase-2b-laufend (S2 Tool-Schema-Surface-Cut — belanna-Ausarbeitung läuft)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#018 P2b-S1 QS grün; Auto-Stop vor S2 (Tool-Surface-Cut)"
+aktiver-auftrag: "#019 P2b-S2 Tool-Schema-Surface-Cut (belanna-Ausarbeitung)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,39 @@ aktiver-auftrag: "#018 P2b-S1 QS grün; Auto-Stop vor S2 (Tool-Surface-Cut)"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #019 — Tracelab P2b-S2 — Tool-Schema-Surface-Cut (ADR-007 final)
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna (Lead-Direktarbeit, kein Worker-Spawn nötig — reine ARCH-Entscheidung)
+- **Auftrag:** S2 von Phase 2b — Tool-Schema-Surface-Cut. ADR-007 in `docs/ARCH.md` final ausfüllen. Belanna arbeitet einen Vorschlag aus, Admin confirmt im Block-Dialog, dann ADR-007 commiten.
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S2)
+  - **Admin-Mandat (2026-05-15):** „ja belanna soll ausarbeiten" — Vorschlags-Mode, kein Eckpfeiler-Mandat.
+- **Drei Sub-Entscheidungen im Vorschlag (Pflicht-Inhalt):**
+  1. **Tool-Naming-Konvention:** `tracelab_<verb>_<noun>` (z.B. `tracelab_sessions_list`) vs `<verb>_<noun>` (z.B. `list_sessions`) vs anderes. Begründung mit MCP-Ecosystem-Konvention (wie nennen andere MCP-Server ihre Tools?) und Konsumenten-UX (Claude Code sieht den Tool-Namen).
+  2. **Tool-vs-Resource für `tail`:** WS-Stream als (a) Single streaming-Tool-Call mit incremental Content, (b) MCP-Resource-Subscription, (c) Sequence of Tool-Calls mit Cursor/Offset. mcp-go v0.45.0 Capabilities check, Konsumenten-UX (wie greift Claude Code zu — Polling vs Subscribe), Begründung mit Considered/Rejected.
+  3. **Auth-Strategie:** Bearer-Token aus `tracelab.toml` via shared `internal/cliconfig/` (selber Discovery-Pfad wie CLI). Konkret: wann wird der Token geladen (Server-Start vs On-Demand), wie wird er an `internal/client/` weitergereicht, Fehlerfall (Token fehlt / falsch).
+- **Pro Tool zusätzlich pinnen** (für ADR-007-Tabelle):
+  - **Finaler Tool-Name** (statt `*_stub`-Placeholder)
+  - **Input-Schema** (Felder + Typen, z.B. `sessions_list` → `{ "limit": number, "since": string }`)
+  - **Output-Schema** (Top-Level-Shape — single object / array / streaming chunks)
+  - **Hub-Endpoint-Mapping** (welcher `internal/client/`-Methode + welcher Hub-Pfad)
+  - **Auth-Anforderung** (Bearer required, ja/nein)
+- **DoD S2:**
+  - ADR-007 in `docs/ARCH.md` final ausgefüllt (alle 3 Sub-Entscheidungen + Tool-Tabelle für sessions/tail/adb/crashes)
+  - Code-Stub-Tool-Namen in `cmd/mcp/main.go` umbenannt von `*_stub` auf finale Namen (optional als Folge-Schritt, oder pro Sub-Sprint S3-S6 inkrementell — belanna entscheidet)
+  - WORKLOG-Verlauf #019: Vorschlag → Admin-Confirm → ADR-007 commit
+- **Auto-Stop-Trigger zusätzlich:**
+  - Admin-Confirm auf Vorschlag ist Auto-Stop (S2 ist explizit Auto-Stop laut Plan-Briefing)
+  - Falls mcp-go v0.45.0 keinen tragfähigen Mechanismus für `tail`-Streaming bietet → Lib-Eignungs-Bruch → Eskalation
+- **Status:** offen — belanna-Vorschlag in Arbeit
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: AUFTRAG eröffnet nach Admin-„ja belanna soll ausarbeiten". S2-Auto-Stop-Pause wird durch Admin-Confirm auf belanna-Vorschlag aufgehoben.
 
 ---
 
