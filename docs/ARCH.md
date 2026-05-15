@@ -198,6 +198,72 @@ AUFTRAG #010 entsprechend angepasst (siehe WORKLOG).
 
 ---
 
+## API Conventions (cross-phase)
+
+Conventions that apply to every new Hub HTTP/WS endpoint. Established during
+Phase 1 (`/ingest`) and reaffirmed in Phase 2a S5 (`/adb/start`, `/adb/stop`).
+New endpoints must follow these — divergence needs an ADR.
+
+### Idempotent state-mutating endpoints → 200 OK + discriminator body
+
+Endpoints that drive a state machine (start/stop, enable/disable, attach/detach)
+return **HTTP 200** in both the "did-something" and the "already-there" case,
+and put the actual outcome in a JSON `status` field on the body.
+
+**Canonical shape:**
+
+```json
+POST /adb/start  { "device_serial": "ABC123" }
+→ 200 OK
+  { "status": "started" }         // bridge transitioned: stopped → running
+  { "status": "already_running" } // bridge was already running for this serial
+
+POST /adb/stop   { "device_serial": "ABC123" }
+→ 200 OK
+  { "status": "stopped" }
+  { "status": "not_running" }
+```
+
+**Why not 409 / 404 for the no-op case:**
+
+- Scripted operators want **`ensure-running`** and **`ensure-stopped`** semantics.
+  They branch on the body (`status == "started" || "already_running"` → success),
+  not on the HTTP status code. Mapping the no-op case to 409/404 forces every
+  caller to special-case non-2xx as "actually fine", which is exactly the kind
+  of fragile shell glue we are trying to spare downstream tooling.
+- This mirrors the Phase-1 `/ingest` pattern: it always returns 202, never 4xx
+  for "session was already there" — the body carries the nuance.
+- HTTP status codes are reserved for **real failures**: auth (401), bad input
+  (400), server errors (5xx). State-machine no-ops are not errors.
+
+**Discriminator naming:** `status` is a flat string at the top level of the
+response body. Values are lowercase, snake_case, past-tense verbs for
+transitions (`started`, `stopped`) and present-tense state for no-ops
+(`already_running`, `not_running`). When a third state appears, add it to the
+endpoint's enum — never silently extend to a different shape.
+
+**Client-side mapping:** the shared client package (`internal/client/`) folds
+discriminator values to `nil` errors when the higher-level intent (ensure-X)
+is satisfied. The discriminator value is **not** surfaced as a return value —
+this keeps the MCP-server surface (Phase 2b) free of "did the no-op happen?"
+state that callers would have to thread through.
+
+### Bearer auth on every authenticated endpoint
+
+All authenticated endpoints require `Authorization: Bearer <token>` matching
+`[auth].token` in `tracelab.toml`. There is no per-route exception. The hub
+returns 401 with an empty body on missing/wrong token — no error message that
+could leak the expected shape of the token.
+
+### Single JSON helpers (`writeJSON` / `decodeJSON`)
+
+All handlers use the shared `writeJSON` (sets `Content-Type: application/json`,
+encodes, logs encoder errors) and `decodeJSON` (rejects unknown fields). Any
+deviation needs a comment explaining why — the convention exists so error
+shapes stay byte-identical across endpoints.
+
+---
+
 ## Phase 2b — MCP server (placeholder)
 
 ADR pending — written at start of Phase 2b. Will reuse `internal/client/`.

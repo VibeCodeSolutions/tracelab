@@ -23,7 +23,14 @@ token = "CHANGEME"
 # an event with source="adb". The bridge reconnects with exponential
 # backoff on subprocess exit; each reconnect opens a NEW session so
 # disconnect gaps stay visible in the forensic trail.
+#
+# Phase 2a / S5 (2026-05-14): bridge lifecycle is now managed per-serial so
+# the same hub can drive multiple devices (config-driven auto-start + the
+# HTTP /adb/* control surface use one shared manager). As a consequence,
+# `device_serial` is REQUIRED when `enabled = true` — there is no implicit
+# "first attached device" anymore. Discover serials with the CLI:
+#   `tracelab adb devices`, then pin one here.
 [adb]
 enabled       = false       # set to true once `adb devices` shows your target
-device_serial = ""          # leave empty to use the only attached device
+device_serial = ""          # REQUIRED when enabled=true (no implicit "first device")
 tag_filter    = ""          # optional single-tag filter, e.g. "MyApp"
