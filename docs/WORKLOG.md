@@ -1,12 +1,12 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2a-readyfor-merge (S1-S5 done, S6 dropped per ADR-005=C)
-last-updated: 2026-05-14
+status: phase-2a-closure-in-progress (FF-Merge + Bookmarks)
+last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260514-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
-aktiver-auftrag: "Phase 2a abgeschlossen — wartet auf Admin-Confirm für FF-Merge nach main"
+aktiver-auftrag: "AUFTRAG #016 — Phase-2a-Closure + Backlog-Bookmarks"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -21,6 +21,38 @@ aktiver-auftrag: "Phase 2a abgeschlossen — wartet auf Admin-Confirm für FF-Me
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #016 — Tracelab Phase-2a-Closure + Backlog-Bookmarks
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna
+- **Auftrag:** Phase-2a-Closure sequenziell:
+  1. **FF-Merge** `feat/phase-2-cli` → `main` (Admin-Confirm 2026-05-15 via „Phase 2 closen"). Push `main` zum Remote.
+  2. **Bookmarks abarbeiten** aus #015 + Header-Eintrag (a)-(c):
+     - **(a)** `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled=true` — `DeviceSerial` ist jetzt PFLICHT-Feld bei `Enabled=true` (Migration aus #015 S5).
+     - **(b)** 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md` (started/already_running/stopped/not_running — scripted „ensure-running"/„ensure-stopped"-Pipelines branchen auf Body, nicht HTTP-Status). Vorlage für künftige Hub-Endpoints.
+     - **(c)** `run.go`-Stub-Refactor: entweder ganz raus aus `cmd/cli/main.go` cobra-Tree, oder klarer „not part of Phase 2a CLI scope"-Hinweis im Short/Long-Description (ADR-005 = Option C konsequent durchziehen).
+  3. **Branch-Cleanup** `feat/phase-2-cli` (lokal + remote `origin/feat/phase-2-cli` löschen) — Force-Op, **Admin-Confirm separat** über chakotay einholen **nach** Schritt 2.
+- **Mandat:**
+  - Belanna entscheidet, ob Bookmarks auf einem kleinen Doku-Branch oder direkt auf `main` landen (Doku-only, kein QS-Gate nötig — kein Code-Touch außer (c)).
+  - Falls (c) Code-Touch beinhaltet (run-Stub-Refactor): kurzer Sanity-Check `go vet ./... && go test ./...`, kein Re-QS-Gate (cosmetic).
+  - Commit-Schema:
+    - FF-Merge-Commit-Message bleibt git-Default (`--ff-only`).
+    - Bookmarks: einzelne Commits pro Bookmark oder ein Sammel-Commit `docs(arch): post-phase-2a backlog bookmarks (a,b,c)` — Belanna-Wahl.
+- **DoD:**
+  - `main` enthält Phase-2a-Code (S1-S5).
+  - Drei Bookmarks (a)/(b)/(c) commited und gepusht.
+  - WORKLOG-Sync-Commit (Modus G) auf `main` nach Bookmark-Abschluss: `chore(state): #016 phase-2a-closure done`.
+  - Branch-Cleanup **noch nicht** ausgeführt — wartet auf Admin-Confirm (separat über chakotay).
+- **Out of Scope:**
+  - Phase 2b (MCP-Server) — separater Auftrag, nicht hier.
+  - Bestehende Phase-1-Backlog-Items (M1-M12 längst durch Tail-Sprint).
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Auftrag angelegt, Mandat an belanna.
 
 ---
 
