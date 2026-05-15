@@ -430,6 +430,218 @@ S3 sessions, S4 tail, S5 adb, S6 crashes) holds; S4 and S6 now both
 carry a small additive hub change as their first step. S3 and S5
 remain pure-MCP-layer because they reuse existing client methods 1:1.
 
+#### ADR-008: `tail_since` Hub-`/events` endpoint shape (Admin-confirmed 2026-05-15 via #021 briefing)
+
+> **Status:** Admin-confirmed via #021 plan briefing (Hub-Schema-Change
+> Auto-Stop für S4 hat grünes Licht, ADR-008 ist die konkrete
+> Schema-Entscheidung dafür — additiv, keine bestehenden Endpoints
+> berührt).
+
+ADR-007 pinned `tail_since(session, since_seq?, limit?) → { events: Event[], next_since_seq: number }`
+as the MCP tool shape. ADR-008 fixes the concrete hub-side schema this
+tool calls into. **All decisions in this ADR are additive**: no existing
+endpoint changes shape, no existing column changes, no client-side
+breaking field shifts.
+
+##### Decision 1 — `events.id` is the opaque cursor; no new `seq` column
+
+`since_seq` (MCP-tool input) and `next_since_seq` (MCP-tool output) are
+**opaque int64 cursors that map 1:1 to `events.id`** — the existing
+`INTEGER PRIMARY KEY AUTOINCREMENT` column on the `events` table. No
+schema migration adds a per-session `seq` column.
+
+**Why:**
+- `events.id` is already globally monotonic per AUTOINCREMENT semantics
+  in SQLite (SQLite documents AUTOINCREMENT as "monotonically increasing,
+  never reused" — exactly the property a forward-only cursor needs).
+- Per-session-monotonic and globally-monotonic both work as opaque
+  cursors when the query is `WHERE session_id = ? AND id > ?` —
+  consumers only ever compare cursor values within one session's
+  response stream.
+- A per-session `seq` column would require either a migration backfill
+  (touching every existing event row) or a write-time trigger
+  (per-insert `MAX(seq)+1` SELECT under transaction). Both add cost for
+  zero new capability — the opaque cursor reads identically to callers.
+- `int64` SQLite ROWID range is 2^63 — practically unbounded for log
+  events.
+
+**Considered & rejected:**
+- New per-session `seq INTEGER` column with migration 0003 backfill +
+  ingest-time UPSERT — implementation cost (backfill ordering, transaction
+  cost in `InsertEvents`) vs. zero observable benefit. The opaque-cursor
+  contract is what callers consume; the underlying column identity is an
+  implementation detail.
+- `ts.UnixNano()` as cursor — ambiguous on identical-nanosecond inserts
+  (the ingest batch can carry many events with the same `ts`),
+  re-orders if a late-arriving event with an older ts gets inserted, and
+  cannot be safely `WHERE ts > X` without a secondary tiebreaker on
+  `id`. Not robust for a forward-only cursor.
+
+##### Decision 2 — `GET /events?session=<id>&since_seq=<n>&limit=<n>` shape
+
+**Endpoint:** `GET /events`, bearer-protected, registered inside the
+existing 30s-timeout sub-group in `internal/http/server.go` (same group
+as `/sessions`, `/ingest`, `/adb/*`).
+
+**Query parameters:**
+
+| Param | Required | Type | Default | Cap |
+|---|---|---|---|---|
+| `session` | yes | string | — | — |
+| `since_seq` | no | int64 | 0 (= return from earliest) | — |
+| `limit` | no | int | 500 | 5000 |
+
+**Response (200 OK):**
+
+```json
+{
+  "events": [
+    { "seq_id": 42, "session_id": "...", "ts": 1700..., "source": "...",
+      "level": "...", "msg": "...", "meta": {...} }
+  ],
+  "next_since_seq": 42
+}
+```
+
+**Cursor semantics:**
+
+- `events` contains rows with `events.id > since_seq`, ordered ascending
+  by `events.id`. The relation is **strict greater-than** (not >=) — the
+  caller's last-seen cursor is the lower exclusive bound, so a naive
+  loop `since_seq := next_since_seq` never re-reads a row.
+- `next_since_seq` is the **maximum `events.id` actually returned**, or
+  `since_seq` (the caller's input) when the result is empty. The
+  "stable on empty" property lets callers loop without special-casing
+  empty pages — the cursor advances only when there is new data, and
+  remains a valid resume point indefinitely.
+
+**Default / cap rationale (Decision 4 below carries the full why):**
+500 default trades round-trip count against MCP-payload size; 5000 cap
+keeps a single response well under the mcp-go default 10 MiB stdio
+frame limit even with verbose `meta` payloads.
+
+**Error shapes:**
+
+| Status | Cause | Body |
+|---|---|---|
+| 400 | `session` missing | `{"error":"session required"}` |
+| 400 | unparseable `since_seq` / `limit` | `{"error":"invalid since_seq: ..."}` / similar |
+| 401 | missing/wrong bearer | (empty, hub-wide convention) |
+| 500 | store query failure | `{"error":"internal"}` (h.internalError) |
+
+Unknown session ID is **not** a 404 — it returns `{ "events": [],
+"next_since_seq": <input since_seq> }`. Reason: session existence is
+already discoverable via `GET /sessions`; `/events` is a forward-only
+cursor read, not a lookup. Returning `[]` keeps the polling loop
+trivial (no branch on "session doesn't exist yet" vs "no new events").
+
+**Considered & rejected:**
+- POST with JSON body — every other read endpoint in the hub is GET +
+  query string (`/sessions?limit=N`); deviating here would force the
+  client package to grow a second code path. Query-string ints are
+  fine for the int64 cursor (Go's `strconv.ParseInt` handles 19-digit
+  literals).
+- WebSocket-backed `/events` stream — duplicates the existing `/tail`
+  WS surface. MCP polling does not benefit from a long-lived
+  connection; ADR-007 explicitly chose polling over subscription
+  because mcp-go v0.45.0 has no working resource-subscribe handler.
+  A new WS endpoint here would carry the chi-`middleware.Timeout`
+  incompatibility (Phase-1 S4 finding) without any consumer benefit.
+- `ts`-based filter (`?since_ts=<unix-ns>`) — see Decision 1 rejection;
+  not robust for forward-only cursors.
+
+##### Decision 3 — `client.Event.SeqID int64` additive field, `omitempty`
+
+`internal/client/types.go` `Event` struct grows one field:
+
+```go
+SeqID int64 `json:"seq_id,omitempty"`
+```
+
+**Why `omitempty`:** the field is populated only on `/events` responses
+(and could be populated by `/tail` later if the WS surface ever needs
+it, but that is not in scope for S4). The existing `/ingest` request
+path and the existing `/tail` response path never set this field —
+`omitempty` ensures the wire format on those code paths is byte-identical
+to pre-S4 traffic, so no other consumer (including the Phase-2a CLI
+running against an older hub during a rolling upgrade) sees any drift.
+
+**Considered & rejected:**
+- Separate `TailEventCursored` type — duplicates the Event surface for
+  a single int64 field. The package already mirrors `/ingest` and
+  `/tail` in one `Event`; mirroring `/events` in a parallel type would
+  force MCP-side handlers to type-juggle for no semantic gain.
+- Rename `Event.ID` (currently store-only) and reuse — `internal/client`'s
+  `Event` has no `ID` field today; the `int64` `ID` on the store-side
+  `Event` is internal. Adding `SeqID` keeps the client/store separation
+  intact (client struct is a wire mirror; store struct is row-shape).
+
+##### Decision 4 — Defaults: `limit` default 500, cap 5000; no new index in migration 0003
+
+**Default 500 / cap 5000:** the MCP-tool consumer (Claude Code) calls
+`tail_since` once per conversation frame and wants enough of the event
+log to make progress without overwhelming the model context. 500 events
+at ~200 bytes average payload is roughly a 100 KB JSON response — well
+under stdio-transport limits, well over a single "I need to see what
+happened" window. 5000 is the cap because even verbose `meta`-heavy
+payloads (~2 KB each) keep one response under 10 MiB; the
+mcp-go default stdio reader is configured for this envelope.
+
+**No new index (no migration 0003):**
+
+The query is `SELECT ... FROM events WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?`.
+The existing `idx_events_session_ts (session_id, ts)` does **not** help
+this query (wrong column order for the `id`-cursor predicate). However,
+`events.id` is the SQLite ROWID (INTEGER PRIMARY KEY AUTOINCREMENT
+aliases the row's internal ROWID), so:
+
+- `events.id > ?` is a B-tree range scan on the **table itself** — no
+  index lookup needed.
+- The `WHERE session_id = ?` filter is applied per row during the scan.
+
+For modest fanout (one session = one device's logcat / one test run),
+the rows for a session are clustered together in id-order — the global
+`id > ?` start point lands near the session's events, and the per-row
+`session_id` filter discards the few interleaved rows from concurrent
+sessions. EXPLAIN QUERY PLAN on a 10k-event test DB shows
+`SEARCH events USING INTEGER PRIMARY KEY (rowid>?)` — the cheapest plan
+SQLite has.
+
+A composite `idx_events_session_id_id (session_id, id)` would let the
+planner skip directly to a session's slice. **It is not worth adding in
+S4** because:
+
+1. The current plan scales linearly with the number of *interleaved*
+   events from other sessions between the cursor and the target — not
+   total event count. In tracelab's usage (one hub, low-dozen concurrent
+   sessions, logcat-rate ingest), this is bounded.
+2. SQLite indexes cost write-time (every `INSERT` touches the index)
+   and on-disk size; for an additive-only event stream, the trade-off
+   tilts negative until we see measured slowdown.
+3. The migration can be added later (additive 0003) without breaking
+   anything — a future "tail latency is bad on a 10M-event archive"
+   finding triggers it. **Tripwire:** when the EXPLAIN cost or a
+   measured P95 latency for `/events` crosses an actionable threshold,
+   open ADR-009 + Migration 0003.
+
+**Considered & rejected:**
+- Add `idx_events_session_id_id` proactively in S4 — see write-cost
+  argument above; premature optimisation without measured pressure.
+- Make `limit` default unlimited — single payload could exceed
+  stdio-transport buffers and silently truncate; opt-in caller-knob
+  is safer.
+
+##### Wire compatibility statement
+
+S4 adds one new endpoint (`GET /events`), one new field on
+`client.Event` (`SeqID`, omitempty), and one new public client method
+(`EventsSince`). It changes **no existing endpoint, no existing column,
+no existing client method**. A pre-S4 client running against a post-S4
+hub keeps working byte-identically on `/ingest`, `/tail`, `/sessions`,
+`/healthz`, `/session/*`, `/adb/*`. A post-S4 client running against a
+pre-S4 hub gets a 404 on `/events` calls — captured cleanly by the
+existing `*HTTPError` non-2xx surface in `internal/client/client.go`.
+
 ## Phase 2c — Dashboard (placeholder)
 
 ADR pending — **scope and stack to be discussed with Admin before start**

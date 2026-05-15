@@ -269,6 +269,56 @@ func (s *Store) InsertEvents(ctx context.Context, sessionID string, events []Eve
 	return nil
 }
 
+// EventsSince returns up to limit events for the given session whose
+// rowid is strictly greater than sinceID, ordered ascending by rowid.
+//
+// This is the forward-cursor query that backs the hub's GET /events
+// endpoint and the MCP tail_since tool (ADR-008, Phase 2b S4). The
+// `id > sinceID` predicate is intentionally strict so callers that loop
+// with `sinceID = lastReturnedID` never re-read a row.
+//
+// limit <= 0 falls back to a 500 default (the same default the HTTP
+// handler applies). A higher limit is the caller's responsibility — the
+// store does not cap; the HTTP layer caps at 5000 (see ADR-008).
+//
+// Empty session ID or unknown session ID returns an empty slice with a
+// nil error: /events is a cursor read, not a session-existence probe.
+func (s *Store) EventsSince(ctx context.Context, sessionID string, sinceID int64, limit int) ([]Event, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, ts, source, level, msg, meta
+		FROM events
+		WHERE session_id = ? AND id > ?
+		ORDER BY id ASC
+		LIMIT ?
+	`, sessionID, sinceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: events since: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var tsNano int64
+		var meta sql.NullString
+		if err := rows.Scan(&e.ID, &e.SessionID, &tsNano, &e.Source, &e.Level, &e.Msg, &meta); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		e.TS = time.Unix(0, tsNano)
+		if meta.Valid {
+			e.Meta = json.RawMessage(meta.String)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows event since: %w", err)
+	}
+	return out, nil
+}
+
 // RecentEvents returns up to limit most-recent events for the session,
 // ordered by ts ASC (chronological — newest at the end of the slice).
 func (s *Store) RecentEvents(ctx context.Context, sessionID string, limit int) ([]Event, error) {

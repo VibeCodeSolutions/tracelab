@@ -218,6 +218,102 @@ func (h *handlers) detectAndUpsertCrashes(ctx context.Context, sessionID string,
 	}
 }
 
+// eventsDefaultLimit / eventsMaxLimit cap GET /events response sizes
+// (ADR-008 Decision 4). The default trades round-trip count against
+// payload size; the cap keeps a single stdio-MCP frame well under
+// transport buffer limits even with verbose `meta` payloads.
+const (
+	eventsDefaultLimit = 500
+	eventsMaxLimit     = 5000
+)
+
+type eventView struct {
+	SeqID     int64           `json:"seq_id"`
+	SessionID string          `json:"session_id"`
+	TS        int64           `json:"ts"`
+	Source    string          `json:"source"`
+	Level     string          `json:"level"`
+	Msg       string          `json:"msg"`
+	Meta      json.RawMessage `json:"meta,omitempty"`
+}
+
+type listEventsResp struct {
+	Events       []eventView `json:"events"`
+	NextSinceSeq int64       `json:"next_since_seq"`
+}
+
+// listEvents serves GET /events?session=<id>&since_seq=<n>&limit=<n>.
+// See ADR-008: opaque events.id cursor, strict `id > since_seq`, stable
+// next_since_seq on empty results (caller's input is echoed back so a
+// polling loop never spins on a stale cursor).
+//
+// Auth is enforced by the bearer-protected sub-router in server.go.
+// Unknown session id is NOT a 404 — it returns events:[] + the caller's
+// since_seq verbatim (the endpoint is a forward-cursor read, not a
+// session-existence probe; existence is discoverable via /sessions).
+func (h *handlers) listEvents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	sessionID := q.Get("session")
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session required"})
+		return
+	}
+
+	var sinceSeq int64
+	if raw := q.Get("since_seq"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid since_seq: " + raw,
+			})
+			return
+		}
+		sinceSeq = n
+	}
+
+	limit := eventsDefaultLimit
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid limit: " + raw,
+			})
+			return
+		}
+		if n > eventsMaxLimit {
+			n = eventsMaxLimit
+		}
+		limit = n
+	}
+
+	events, err := h.store.EventsSince(r.Context(), sessionID, sinceSeq, limit)
+	if err != nil {
+		h.internalError(w, r, "list events failed", err)
+		return
+	}
+
+	out := make([]eventView, len(events))
+	nextSinceSeq := sinceSeq // stable-on-empty: echo caller's cursor
+	for i, e := range events {
+		out[i] = eventView{
+			SeqID:     e.ID,
+			SessionID: e.SessionID,
+			TS:        e.TS.UnixNano(),
+			Source:    e.Source,
+			Level:     e.Level,
+			Msg:       e.Msg,
+			Meta:      e.Meta,
+		}
+		if e.ID > nextSinceSeq {
+			nextSinceSeq = e.ID
+		}
+	}
+	writeJSON(w, http.StatusOK, listEventsResp{
+		Events:       out,
+		NextSinceSeq: nextSinceSeq,
+	})
+}
+
 type sessionView struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`

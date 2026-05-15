@@ -106,6 +106,11 @@ func New(st *store.Store, cfg Config) http.Handler {
 			tr.Post("/ingest", h.ingest)
 			tr.Get("/sessions", h.listSessions)
 
+			// /events serves the forward-cursor read for Phase-2b S4
+			// (ADR-008). Sits in the bearer-guarded, 30s-timeout
+			// group — same envelope as the other JSON read endpoints.
+			tr.Get("/events", h.listEvents)
+
 			// /adb/* routes — additive in S5 (ADR-004 Option B).
 			// Registered inside the same timeout-bounded group as the
 			// other JSON endpoints: GET /adb/devices shells out to

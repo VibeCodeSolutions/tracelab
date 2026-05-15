@@ -19,7 +19,12 @@ import "encoding/json"
 //   - SessionID is empty on the ingest path (the hub knows the session
 //     from the POST envelope) and populated on /tail frames so a single
 //     unfiltered subscriber can demultiplex multiple sessions.
+//   - SeqID is populated only on /events responses (Phase 2b S4,
+//     ADR-008): it is the opaque int64 cursor consumers feed back as
+//     the next call's since_seq. `omitempty` keeps /ingest + /tail
+//     wire-identical to pre-S4 traffic (no rolling-upgrade drift).
 type Event struct {
+	SeqID     int64          `json:"seq_id,omitempty"`
 	SessionID string         `json:"session_id,omitempty"`
 	TS        int64          `json:"ts,omitempty"`
 	Source    string         `json:"source"`
@@ -78,4 +83,22 @@ type ingestRespWire struct {
 
 type listSessionsRespWire struct {
 	Sessions []Session `json:"sessions"`
+}
+
+// eventsSinceEventWire is the on-wire shape of one /events response row.
+// Mirrors internal/http.eventView; kept here so the client package owns
+// its own decoder type (no import of internal/http).
+type eventsSinceEventWire struct {
+	SeqID     int64           `json:"seq_id"`
+	SessionID string          `json:"session_id"`
+	TS        int64           `json:"ts"`
+	Source    string          `json:"source"`
+	Level     string          `json:"level"`
+	Msg       string          `json:"msg"`
+	Meta      json.RawMessage `json:"meta,omitempty"`
+}
+
+type eventsSinceRespWire struct {
+	Events       []eventsSinceEventWire `json:"events"`
+	NextSinceSeq int64                  `json:"next_since_seq"`
 }

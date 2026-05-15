@@ -55,6 +55,7 @@ the token with `openssl rand -hex 32`.
 | POST   | `/session/end`   | yes  | Mark a session ended (204 on success).    |
 | POST   | `/ingest`        | yes  | Batch-insert events (202 on accept).      |
 | GET    | `/sessions`      | yes  | List recent sessions (`?limit=N`).        |
+| GET    | `/events`        | yes  | Forward-cursor read: `?session=<id>&since_seq=<n>&limit=<n>` returns `{events, next_since_seq}` (Phase 2b S4, ADR-008). |
 | GET    | `/tail`          | yes  | WebSocket fan-out, optional `?session=<id>` filter. |
 
 The token must be sent as an `Authorization: Bearer <token>` **header** —

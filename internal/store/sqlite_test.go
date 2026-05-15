@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -302,5 +303,185 @@ func TestInsertEventsRejectsUnknownSession(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected FK violation, got nil")
+	}
+}
+
+// TestEventsSinceCursorAdvances seeds five events for one session, then
+// walks the cursor forward in batches of two — the canonical Phase-2b S4
+// polling loop (ADR-008). Verifies (a) strict `id > since_seq` semantics
+// (cursor never re-reads), (b) ascending id-order in each page, (c)
+// next_since_seq monotonically tracks the last returned id.
+func TestEventsSinceCursorAdvances(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, "since-walk")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	events := make([]Event, 5)
+	for i := range events {
+		events[i] = Event{
+			TS:     time.Unix(int64(1700000000+i), 0),
+			Source: "test", Level: "info", Msg: fmt.Sprintf("evt-%d", i),
+		}
+	}
+	if err := s.InsertEvents(ctx, id, events); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+
+	var cursor int64
+	var collected []string
+	for round := 0; round < 4; round++ { // bounded to avoid runaway
+		batch, err := s.EventsSince(ctx, id, cursor, 2)
+		if err != nil {
+			t.Fatalf("EventsSince round %d: %v", round, err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		// Ascending id order within a page.
+		for i := 1; i < len(batch); i++ {
+			if batch[i].ID <= batch[i-1].ID {
+				t.Errorf("page %d not ascending: %d <= %d", round, batch[i].ID, batch[i-1].ID)
+			}
+		}
+		// Cursor must strictly advance — no re-read.
+		if batch[0].ID <= cursor {
+			t.Errorf("page %d first id %d <= cursor %d (strict-greater-than violated)", round, batch[0].ID, cursor)
+		}
+		for _, e := range batch {
+			collected = append(collected, e.Msg)
+		}
+		cursor = batch[len(batch)-1].ID
+	}
+	want := []string{"evt-0", "evt-1", "evt-2", "evt-3", "evt-4"}
+	if len(collected) != len(want) {
+		t.Fatalf("collected %d events, want %d: %v", len(collected), len(want), collected)
+	}
+	for i := range want {
+		if collected[i] != want[i] {
+			t.Errorf("collected[%d] = %q, want %q", i, collected[i], want[i])
+		}
+	}
+}
+
+// TestEventsSinceEmptyResult covers two empty-result cases that must
+// both succeed cleanly with a nil-or-zero-length slice and a nil error:
+//
+//   - session ID does not exist (cursor read is not a session probe).
+//   - session exists but no events at-or-after the cursor.
+//
+// These are the two paths that drive the "stable on empty" property in
+// the HTTP handler: next_since_seq stays at the caller's input when
+// nothing is returned, so a polling loop never spins on a stale cursor.
+func TestEventsSinceEmptyResult(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Case 1: unknown session.
+	got, err := s.EventsSince(ctx, "ghost-session", 0, 100)
+	if err != nil {
+		t.Fatalf("unknown session: unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("unknown session: want empty, got %d events", len(got))
+	}
+
+	// Case 2: known session, cursor past the highest event id.
+	id, err := s.CreateSession(ctx, "since-empty")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := s.InsertEvents(ctx, id, []Event{{Source: "x", Level: "info", Msg: "only"}}); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	// Establish the current max id, then read with a cursor at that max.
+	all, err := s.EventsSince(ctx, id, 0, 10)
+	if err != nil {
+		t.Fatalf("warmup EventsSince: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("warmup: want 1 event, got %d", len(all))
+	}
+	maxID := all[0].ID
+	tail, err := s.EventsSince(ctx, id, maxID, 10)
+	if err != nil {
+		t.Fatalf("tail EventsSince: %v", err)
+	}
+	if len(tail) != 0 {
+		t.Errorf("cursor at max: want empty, got %d events", len(tail))
+	}
+}
+
+// TestEventsSinceLimitDefault asserts that limit <= 0 falls back to the
+// 500-row default (matches the HTTP handler's default, see ADR-008).
+// We seed three events and pass limit=0 — all three must come back.
+func TestEventsSinceLimitDefault(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, "since-default")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	events := []Event{
+		{Source: "a", Level: "info", Msg: "one"},
+		{Source: "a", Level: "info", Msg: "two"},
+		{Source: "a", Level: "info", Msg: "three"},
+	}
+	if err := s.InsertEvents(ctx, id, events); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	got, err := s.EventsSince(ctx, id, 0, 0)
+	if err != nil {
+		t.Fatalf("EventsSince: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("limit=0 default: want 3, got %d", len(got))
+	}
+}
+
+// TestEventsSinceCrossSessionIsolation puts events in two sessions and
+// verifies the cursor walks only one session's rows — even though
+// `events.id` is globally monotonic (per ADR-008 Decision 1), the
+// per-session filter must not leak rows from another session.
+func TestEventsSinceCrossSessionIsolation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	a, err := s.CreateSession(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	b, err := s.CreateSession(ctx, "session-b")
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	// Interleave inserts so A and B share id-neighbourhood.
+	if err := s.InsertEvents(ctx, a, []Event{{Source: "a", Level: "info", Msg: "a1"}}); err != nil {
+		t.Fatalf("Insert a1: %v", err)
+	}
+	if err := s.InsertEvents(ctx, b, []Event{{Source: "b", Level: "info", Msg: "b1"}}); err != nil {
+		t.Fatalf("Insert b1: %v", err)
+	}
+	if err := s.InsertEvents(ctx, a, []Event{{Source: "a", Level: "info", Msg: "a2"}}); err != nil {
+		t.Fatalf("Insert a2: %v", err)
+	}
+	if err := s.InsertEvents(ctx, b, []Event{{Source: "b", Level: "info", Msg: "b2"}}); err != nil {
+		t.Fatalf("Insert b2: %v", err)
+	}
+
+	got, err := s.EventsSince(ctx, a, 0, 100)
+	if err != nil {
+		t.Fatalf("EventsSince A: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("session A: want 2 events, got %d", len(got))
+	}
+	for _, e := range got {
+		if e.SessionID != a {
+			t.Errorf("session A leak: got event with session_id=%q", e.SessionID)
+		}
+		if e.Source != "a" {
+			t.Errorf("session A leak by source: %+v", e)
+		}
 	}
 }

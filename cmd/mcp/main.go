@@ -5,13 +5,15 @@
 //   - S1 (skeleton): four placeholder tools on a stdio transport.
 //   - S2 (ADR-007):  final tool surface pinned (sessions_list, tail_*,
 //     crashes_*, adb_*).
-//   - S3 (current):  sessions_list is the first real tool — registration,
+//   - S3:            sessions_list is the first real tool — registration,
 //     bearer-auth plumbing, client-side since-filter, hub
 //     wiring against internal/client.ListSessions.
+//   - S4 (current):  tail_since is the second real tool — opaque int64
+//     cursor against the new GET /events hub endpoint
+//     (ADR-008), JSON-encoded {events, next_since_seq}.
 //
-// Stubs still in place: adb_stub, crashes_stub, tail_stub. They are
-// replaced sucessively in S4 (tail), S5 (crashes — pending Hub-Schema
-// change) and S6 (adb).
+// Stubs still in place: adb_stub, crashes_stub. They retire in S5 (adb)
+// and S6 (crashes — pending Hub-Schema change for /crashes).
 //
 // Bearer-auth wiring (per ADR-007):
 //
@@ -70,16 +72,12 @@ type stubTool struct {
 }
 
 // stubTools is the registration source of truth for the remaining
-// placeholders. sessions_list (S3, this commit) moved out into
-// cmd/mcp/sessions.go; only adb / crashes / tail remain as stubs.
+// placeholders. sessions_list (S3) and tail_since (S4) have moved out
+// into their own files; only adb / crashes remain as stubs.
 var stubTools = []stubTool{
 	{
-		name:        "tail_stub",
-		description: "Placeholder for the tail tool (live event stream). Tool-vs-resource decision deferred to Phase 2b S4.",
-	},
-	{
 		name:        "crashes_stub",
-		description: "Placeholder for the crashes tool. Requires hub-side /crashes endpoint (ADR-007 S5 risk, Admin-confirm pending).",
+		description: "Placeholder for the crashes tool. Requires hub-side /crashes endpoint (ADR-007 S6 risk, Admin-confirm pending).",
 	},
 	{
 		name:        "adb_stub",
@@ -140,9 +138,12 @@ func buildServer(hubClient *client.Client) *server.MCPServer {
 	)
 
 	// Real tools (S3+). AddTools is the variadic ServerTool registration
-	// path; we use it because newSessionsListTool returns a ServerTool
+	// path; we use it because each newXxxTool returns a ServerTool
 	// (Tool + Handler bundled).
-	s.AddTools(newSessionsListTool(hubClient))
+	s.AddTools(
+		newSessionsListTool(hubClient),
+		newTailSinceTool(hubClient),
+	)
 
 	// Remaining stubs (replaced in S4 / S5 / S6).
 	for _, st := range stubTools {
