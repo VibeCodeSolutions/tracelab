@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S1 Skeleton + ARCH-Vorab in Arbeit)
+status: phase-2b-laufend (S1 QS grün; Auto-Stop vor S2 — Tool-Surface-Cut wartet auf Admin-Confirm)
 last-updated: 2026-05-15
-qs-letzter-lauf: qs-20260514-003
+qs-letzter-lauf: qs-20260515-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#018 P2b-S1 Skeleton + ARCH-Vorab"
+aktiver-auftrag: "#018 P2b-S1 QS grün; Auto-Stop vor S2 (Tool-Surface-Cut)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -48,9 +48,13 @@ aktiver-auftrag: "#018 P2b-S1 Skeleton + ARCH-Vorab"
 - **Worker-Brief-Disziplin (PFLICHT):**
   - Trance-Bruch-Cross-Check-Scope EXPLIZIT breit: alle Dateien im Sprint-Touch-Scope inkl. Package-Doc + Const-Blocks + Smoke-Test-Doc (Lesson Cross-Check-Scope #013→#014→#015, 3× bestätigt)
   - Phase-1+2a-Code unangetastet außer Makefile (LDFLAGS-Erweiterung) und ggf. `docs/ARCH.md`
-- **Status:** offen — Lead-Direktarbeit ADR-006 läuft, Worker-Spawn ballard folgt für Code
+- **Status:** ✅ QS grün — Findings-Gate freigegeben (qs-20260515-001, 0 Findings). Code+ARCH gemerged auf `feat/phase-2-mcp`. Auto-Stop vor S2 (Tool-Surface-Cut) — wartet auf Admin-Confirm.
 - **Verlauf:**
   - 2026-05-15T (Eröffnung) — belanna: Auftrag empfangen, `/crashes`-Pre-Check Lead-Direktarbeit: Endpoint fehlt am Hub, Store-Tabelle vorhanden (`internal/store/sqlite.go:397` Kommentar „future /crashes API"). S6-Auto-Stop-Risiko in ADR-007 dokumentieren.
+  - 2026-05-15T (Code) — ballard: `cmd/mcp/main.go` + `cmd/mcp/main_test.go` + Makefile-Erweiterung. mcp-go v0.45.0 gepinnt (jüngster Release vor go-1.25.5-Bump → kompatibel mit Repo `go 1.25.0`). 4 Stub-Tools (`sessions_stub`/`tail_stub`/`crashes_stub`/`adb_stub`) auf stdio. go vet clean, go test -race ./... grün, `make mcp` + `make mcp-linux` + `make mcp-windows` build clean.
+  - 2026-05-15T (QS-Lauf) — tuvok, qs-20260515-001: QS-Lauf gestartet.
+  - 2026-05-15T (QS-Lauf abgeschlossen) — tuvok, qs-20260515-001: alle 8 DoD-Punkte erfüllt. `go vet ./...` clean, `go test -race ./...` repo-weit grün (alle 11 Pakete cached/PASS), 4 Smoke-Tests in `cmd/mcp` grün. `make mcp` + `make mcp-linux` + `make mcp-windows` builds clean, `./dist/tracelab-mcp --version` druckt LDFLAGS-Wert. mcp-go v0.45.0-Pin-Begründung (go 1.23.0 vs v0.54.0=go 1.25.5) selbst verifiziert. mcp-go-API-Eignung: `NewMCPServer`, `AddTool`, `NewTool`, `WithDescription`, `WithToolCapabilities`, `NewToolResultError`, `ServeStdio`, `ListTools()` alle in v0.45.0 vorhanden — Tools sind real registriert (nicht nur deklariert), Handler-Return-Shape (`IsError=true` mit TextContent) konform. `git diff main -- internal/ cmd/hub/ cmd/cli/` leer, Makefile + go.mod/go.sum + WORKLOG additiv. ADR-006 voll (mit Considered/Rejected), ADR-007 Skelett mit 4 Tools + S6-`/crashes`-Risiko-Vermerk; Pre-Check selbst verifiziert (`grep -rn "/crashes" internal/http/` leer, `internal/store/sqlite.go:397` Comment exakt zitiert). Trance-Bruch-Cross-Check (Package-Doc + Const-Blocks + Smoke-Test-Doc gegen Code-Verhalten): kein Drift. **Findings: 0 Blocker / 0 Major / 0 Minor.** Status: `freigabe`.
+  - 2026-05-15T (Findings-Gate) — chakotay: **Freigabe.** Strategie/Proportion: 0 Findings auf erstem 2b-Sub-Sprint (Skeleton + ARCH + neue Lib) mit Erhöhte-Aufmerksamkeit A-F durchgehend grün. Routine-Durchwinker. Code-Commit `adc8b71` und ARCH-Commit `72582d4` schon gemerged auf `feat/phase-2-mcp`. **Cross-Check-Scope-Lesson 4× bestätigt** (#013-#014-#015-#018) → Promotion-Trigger erreicht: T5-Konsolidierung in `30_Wissen/Worker-Brief-Konventionen.md` final, Belanna-T3 wird auf Wikilink-Stub reduziert (chakotay-Pflicht-Outro). **Auto-Stop S2 greift jetzt** — Tool-Surface-Cut-Entscheidung (Naming, Tool-vs-Resource für `tail`, Auth-Strategie) braucht Admin-Confirm vor Sub-Sprint-Eröffnung.
 
 ---
 
