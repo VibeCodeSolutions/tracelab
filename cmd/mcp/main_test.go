@@ -42,20 +42,20 @@ func TestBuildServerConstructs(t *testing.T) {
 }
 
 // TestServerRegistersExpectedTools asserts the real tools (sessions_list
-// from S3 + tail_since from S4) and the two remaining stub placeholders
-// (adb / crashes) are present in the server's tool registry. Sorted-name
-// comparison gives deterministic failure messages when a tool moves in
-// or out.
+// from S3, tail_since from S4, adb_devices/adb_start/adb_stop from S5)
+// and the remaining stub placeholder (crashes) are present in the
+// server's tool registry. Sorted-name comparison gives deterministic
+// failure messages when a tool moves in or out.
 func TestServerRegistersExpectedTools(t *testing.T) {
 	t.Parallel()
 	c := newTestHubServer(t, http.NotFoundHandler())
 	s := buildServer(c)
 	tools := s.ListTools()
 
-	// Sorted alphabetically: adb_stub, crashes_stub, sessions_list,
-	// tail_since. sessions_stub from S1 retired in S3; tail_stub from
-	// S1 retires in this commit (S4).
-	want := []string{"adb_stub", "crashes_stub", "sessions_list", "tail_since"}
+	// Sorted alphabetically: adb_devices, adb_start, adb_stop,
+	// crashes_stub, sessions_list, tail_since. sessions_stub retired
+	// in S3, tail_stub in S4, adb_stub in this commit (S5).
+	want := []string{"adb_devices", "adb_start", "adb_stop", "crashes_stub", "sessions_list", "tail_since"}
 	got := make([]string, 0, len(tools))
 	for name := range tools {
 		got = append(got, name)
@@ -89,9 +89,9 @@ func TestToolDescriptionsPresent(t *testing.T) {
 
 // TestStubHandlerReturnsNotImplemented asserts the remaining placeholder
 // handler returns a structured "not implemented" error pointing at
-// ADR-007. sessions_stub retired in S3 (covered by sessions_list tests);
-// tail_stub retired in S4 (covered by tail_since tests in tail_test.go).
-// The loop only walks the still-stubbed tools (adb / crashes).
+// ADR-007. sessions_stub retired in S3 (sessions_list tests); tail_stub
+// in S4 (tail_since tests in tail_test.go); adb_stub in S5 (adb_devices/
+// _start/_stop tests in adb_test.go). The remaining stub is crashes.
 func TestStubHandlerReturnsNotImplemented(t *testing.T) {
 	t.Parallel()
 	res, err := stubHandler(context.Background(), mcp.CallToolRequest{})

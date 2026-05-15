@@ -8,12 +8,17 @@
 //   - S3:            sessions_list is the first real tool — registration,
 //     bearer-auth plumbing, client-side since-filter, hub
 //     wiring against internal/client.ListSessions.
-//   - S4 (current):  tail_since is the second real tool — opaque int64
+//   - S4:            tail_since is the second real tool — opaque int64
 //     cursor against the new GET /events hub endpoint
 //     (ADR-008), JSON-encoded {events, next_since_seq}.
+//   - S5 (current):  adb_devices / adb_start / adb_stop — three real
+//     tools wrapping the existing hub /adb/* endpoints from
+//     ADR-004 Option B. Pure MCP-layer wiring; the client
+//     signature was extended additively to pass through the
+//     hub's idempotency discriminator (status field).
 //
-// Stubs still in place: adb_stub, crashes_stub. They retire in S5 (adb)
-// and S6 (crashes — pending Hub-Schema change for /crashes).
+// Stubs still in place: crashes_stub. Retires in S6 (pending hub-side
+// /crashes endpoint shape — ADR-007 S6 risk, Admin-confirm pending).
 //
 // Bearer-auth wiring (per ADR-007):
 //
@@ -72,16 +77,13 @@ type stubTool struct {
 }
 
 // stubTools is the registration source of truth for the remaining
-// placeholders. sessions_list (S3) and tail_since (S4) have moved out
-// into their own files; only adb / crashes remain as stubs.
+// placeholders. sessions_list (S3), tail_since (S4), and the adb_*
+// trio (S5) have moved out into their own files; only crashes remains
+// as a stub.
 var stubTools = []stubTool{
 	{
 		name:        "crashes_stub",
 		description: "Placeholder for the crashes tool. Requires hub-side /crashes endpoint (ADR-007 S6 risk, Admin-confirm pending).",
-	},
-	{
-		name:        "adb_stub",
-		description: "Placeholder for the adb tool (devices/start/stop). Will reuse the hub /adb/* surface from ADR-004 Option B.",
 	},
 }
 
@@ -143,9 +145,12 @@ func buildServer(hubClient *client.Client) *server.MCPServer {
 	s.AddTools(
 		newSessionsListTool(hubClient),
 		newTailSinceTool(hubClient),
+		newADBDevicesTool(hubClient),
+		newADBStartTool(hubClient),
+		newADBStopTool(hubClient),
 	)
 
-	// Remaining stubs (replaced in S4 / S5 / S6).
+	// Remaining stubs (replaced in S6 — crashes pending Hub-Schema).
 	for _, st := range stubTools {
 		s.AddTool(
 			mcp.NewTool(st.name, mcp.WithDescription(st.description)),
