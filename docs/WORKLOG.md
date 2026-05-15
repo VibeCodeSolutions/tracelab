@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S4 QS-grün — Hub-`/events` + ADR-008 live; S5 adb-MCP-Tool reine MCP-Layer, kein Auto-Stop)
+status: phase-2b-laufend (S5 eröffnet — adb-MCP-Tools `adb_devices`/`adb_start`/`adb_stop`; reine MCP-Layer-Wiring, kein Hub-Touch. Admin-Pauschal-Confirm bis Context-45%)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#021 P2b-S4 QS-grün — wartet auf Admin-Confirm für S5-Eröffnung"
+aktiver-auftrag: "#022 P2b-S5 adb-MCP-Tools"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,36 @@ aktiver-auftrag: "#021 P2b-S4 QS-grün — wartet auf Admin-Confirm für S5-Erö
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #022 — Tracelab P2b-S5 — adb-MCP-Tools (`adb_devices`/`adb_start`/`adb_stop`)
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (Pauschal-Confirm „weiter solange context unter 45%") → Chakotay (Auto-Chain nach #021-Freigabe) → belanna
+- **Auftrag:** S5 von Phase 2b — drei MCP-Tools für ADB-Bridge-Steuerung. Reine MCP-Layer-Wiring, kein Hub-Touch, alle Client-Methoden existieren seit Phase-1-S6/S7.
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S5)
+  - **ADR-Ref:** ADR-007 (Admin-confirmed 2026-05-15) — `adb_devices` `{}` → `{ devices: ADBDevice[] }` / `client.ADBDevices`; `adb_start` `{ device_serial, tag_filter? }` → `{ status: "started"|"already_running" }` / `client.ADBStart`; `adb_stop` `{ device_serial }` → `{ status: "stopped"|"not_running" }` / `client.ADBStop`. Bearer required, alle Hub-Endpoints existing.
+  - **Branch:** `feat/phase-2-mcp` (aktiv, tip `5792111`)
+- **DoD S5:**
+  - Drei Tools `adb_devices`/`adb_start`/`adb_stop` in `cmd/mcp/adb.go` (Single-File-Sub-Sprint analog Belannas Plan-Cut-Mandate; oder gesplittet falls Belanna Reviewability-Argument hat) — Pattern aus `cmd/mcp/sessions.go` (S3) und `cmd/mcp/tail.go` (S4) 1:1 wiederverwendbar
+  - Input-Schemas mit mcp-go-Schema-Builder (Required-Felder + optionale `tag_filter`)
+  - Handler ruft existing `client.ADBDevices`/`ADBStart`/`ADBStop` 1:1
+  - JSON-encoded TextContent-Output, defensive nil-slice-Normalisierung (für `adb_devices` bei empty)
+  - mcp-go-Smoke-Tests pro Tool (Registered, Description, Schema-Variants, WrongTypes-Tripwire, HandlerCallsHub, AuthFail, Empty-Stability)
+  - Stub-Removal: `adb_stub` aus `stubTools`-Slice in `cmd/mcp/main.go` raus, `want`-Slice in `main_test.go` aktualisiert (`[adb_devices, adb_start, adb_stop, crashes_stub, sessions_list, tail_since]`)
+  - `go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün
+- **Mandat:**
+  - Worker-Spawn ballard empfohlen (Klasse `feature`, Konsistenz mit S3+S4 — 3 Tools sind substantiell, auch wenn jedes einzelne dünn ist)
+  - Single-Commit ODER 3 Commits (1 pro Tool) — Belannas Entscheidung nach Reviewability-Argument
+  - Cross-Check-Scope voll wie #020/#021 (Lesson 6× bestätigt): `git diff main -- internal/adb internal/crash internal/ws internal/ingest internal/cliconfig internal/config cmd/cli cmd/hub` MUSS 0 Lines bleiben
+- **Auto-Stop S5:** keine zusätzlichen über 5a-Default hinaus. **Reine MCP-Layer-Wiring.**
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Auto-Chain nach #021-Freigabe unter Admin-Pauschal-Confirm „weiter solange context unter 45% bleibt". S5 routet an belanna mit Mandat „Tool-Template aus S3/S4 1:1, kein Hub-Touch".
 
 ---
 
