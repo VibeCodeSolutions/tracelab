@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2a-closed (S1-S5 + Bookmarks gemerged; Branch-Cleanup wartet auf Admin-Confirm)
+status: phase-2a-closed (S1-S5 + Bookmarks gemerged, Branch entsorgt; Phase 2b offen)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260514-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "AUFTRAG #016 — Phase-2a-Closure (Code+Doku done, Branch-Cleanup offen)"
+aktiver-auftrag: "keiner — Phase 2a abgeschlossen, Phase 2b (MCP-Server) wartet auf Admin-Eröffnung"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -59,8 +59,8 @@ aktiver-auftrag: "AUFTRAG #016 — Phase-2a-Closure (Code+Doku done, Branch-Clea
     - **(a)+(b)** `docs: post-phase-2a backlog bookmarks (toml.example, ARCH API conventions)` — `tracelab.toml.example` [adb]-Section: `device_serial` als REQUIRED bei `enabled=true` dokumentiert (S5-Manager-Migration, kein implicit "first device" mehr); `docs/ARCH.md` neue Cross-Phase-Section "API Conventions" mit dem 200-OK + Discriminator-Body-Pattern (`started`/`already_running`/`stopped`/`not_running`), Begründung (scripted ensure-X-Pipelines branchen auf Body, nicht Status), Spiegelung Phase-1-`/ingest`-Pattern, Discriminator-Naming-Konvention (lowercase snake_case, past-tense für Transitions, present-tense für No-Ops), Client-Side-Mapping-Hinweis (Discriminator zu `nil` gefoldet, nicht surfaced — MCP-Future-Proof). Zusätzlich Bearer-Auth + Single-JSON-Helpers als reaffirmierte Konventionen aufgenommen.
     - **(c)** `refactor(cli): drop run sub-command per ADR-005=Option C` — `cmd/cli/run.go` komplett gelöscht (statt Stub-mit-Disclaimer-Variante); `cmd/cli/main.go` `AddCommand(newRunCmd())`-Aufruf entfernt + Package-Doc aktualisiert (Phase-2a final, kein S6, keine pending ADRs); `cmd/cli/main_test.go` `want`-Slice auf `[adb sessions tail]` reduziert + Kommentar mit ADR-005-Verweis. Begründung Lead: konsequente Umsetzung Option C — ein Stub, der "not implemented yet" druckt, widerspricht der CLI-Identität als purem Consumer im `--help`-Output und hinterlässt mentalen Müll. Bei realem Bedarf später eigener Sprint (Option B-Variante).
     - **Sanity-Check (Mandat-konform statt formales QS-Gate):** `go vet ./...` clean, `go test -count=1 ./...` repo-weit grün (10/10 Pakete ok). `cmd/cli` bleibt unter den bisherigen 0.027s. Test-Surface-Reduktion: 1 expected sub-command weniger im Smoke-Test, sonst keine Test-Adjustments nötig (run hatte nur den Smoke-Counter triggernden Eintrag, keinen eigenen Behavior-Test).
-  - **Offen (Schritt 3 — Branch-Cleanup):** `feat/phase-2-cli` lokal + `origin/feat/phase-2-cli` löschen. Force-Op pro Plan-Briefing-Default-Modus (Sektion 5a) — wartet auf Admin-Confirm via chakotay.
-- **Status:** Code+Doku erledigt, FF-Merge gemerged + gepusht, Branch-Cleanup ausstehend.
+  - 2026-05-15T (Schritt 3 done) — chakotay: Admin-Confirm „ja" für Branch-Cleanup eingeholt. Pre-Delete-Verifikation `git merge-base --is-ancestor feat/phase-2-cli main` ⇒ OK (Branch vollständig in main enthalten, tip war `bdc3a0c`, kein Datenverlust-Risiko). `git branch -D feat/phase-2-cli` lokal + `git push origin --delete feat/phase-2-cli` remote. `git branch -a` bestätigt: nur noch `main` lokal + `origin/main` remote. Sync-Commit nach Modus G folgt mit diesem WORKLOG-Update.
+- **Status:** ✅ erledigt. Phase 2a vollständig abgeschlossen, Repo auf `main` konsolidiert. Phase 2b (MCP-Server) wartet auf Admin-Eröffnung.
 
 ---
 
