@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2a-closed (S1-S5 + Bookmarks gemerged, Branch entsorgt; Phase 2b offen)
+status: phase-2b-laufend (Umbrella eröffnet, S1 in Vorbereitung)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260514-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "keiner — Phase 2a abgeschlossen, Phase 2b (MCP-Server) wartet auf Admin-Eröffnung"
+aktiver-auftrag: "#017 Phase-2b MCP-Server (Umbrella)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,50 @@ aktiver-auftrag: "keiner — Phase 2a abgeschlossen, Phase 2b (MCP-Server) warte
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #017 — Tracelab Phase 2b — `tracelab-mcp` MCP-Server (Umbrella)
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** Phase 2b der Phase-2-Roadmap — `tracelab-mcp` MCP-Server bauen. Wrappt Hub-API als MCP-Tools für Claude Code (sessions/tail/crashes/adb). Konsumiert dieselben HTTP+WS-Endpoints wie die CLI über shared `internal/client/`.
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Block 1/2/3 ✅ 2026-05-15, Admin-Approval „alle geplanten Phasen durcharbeiten" am 2026-05-15)
+  - **Parent-Plan:** `~/.claude/plans/tracelab-phase-2-roadmap.md` (Phase-2-Roadmap, 3 Phasen 2a/2b/2c)
+  - **Branch:** `feat/phase-2-mcp` von `main@9536b12` (bereits lokal angelegt)
+  - **Sub-Sprint-Schnitt (Plan-Default, belanna kann anpassen):**
+    - **S1** — Skeleton + ARCH-Vorab (cmd/mcp/main.go, mcp-go-Init, ADR-006 Lib-Wahl + ADR-007 Tool-Surface-Skelett)
+    - **S2** — Tool-Schema-Surface-Cut (**Auto-Stop**: Naming, Tool-vs-Resource für tail, Auth-Strategie)
+    - **S3** — `sessions`-Tool (list + get-by-id, reuse internal/client.ListSessions)
+    - **S4** — `tail`-Tool/Resource (WS-Stream, reuse internal/client.Tail — Surface-Form folgt S2)
+    - **S5** — `adb`-Tool (devices/start/stop, reuse internal/client ADB)
+    - **S6** — `crashes`-Tool (**potenzieller Auto-Stop**: falls Hub-`/crashes`-Endpoint fehlt → ADR analog 2a-S5/ADR-004)
+- **ARCH-Vorab (`docs/ARCH.md`, vor S1-Code):**
+  - ADR-006 — Lib-Wahl `github.com/mark3labs/mcp-go` (Ballard-Stack-Default), Begründung + Considered/Rejected
+  - ADR-007 — Tool-Surface-Liste (Skelett in S1, final in S2)
+- **DoD Phase 2b:**
+  - `cmd/mcp/main.go` baut → `tracelab-mcp` Binary, cross-compiled für Linux+Windows ohne CGO
+  - 4 Tools (sessions/tail/crashes/adb) funktional gegen lokal-laufenden Hub
+  - `internal/client/` wiederverwendet, kein Hub-API-Re-Implement
+  - `go test -race ./...` repo-weit grün
+  - `docs/ARCH.md` Phase-2b-Sektion ausgefüllt (ADR-006 + ADR-007 final)
+  - tuvok release-qs Findings-Gate grün (keine Blocker, keine offenen Major) am Phasen-Ende
+- **Auto-Continuation-Modus (5a-Default + Admin-Bekräftigung „alle geplanten Phasen durcharbeiten"):**
+  - Lead-Autonomie für Standard-git-Ops, Commit pro logischer Einheit
+  - Per-Sub-Sprint-QS via tuvok → Findings-Gate über chakotay
+  - Bei `freigabe` ohne Findings ≥ major → direkt nächsten Sub-Sprint routen (Auto-Chain)
+  - Recovery-Patterns max 2 Versuche
+  - FF-Merge nach `main` NACH Phasen-Done und Admin-Confirm
+- **Auto-Stop-Trigger zusätzlich:**
+  - **S2 Tool-Schema-Surface-Cut** (Naming, Tool-vs-Resource) — Admin-Confirm
+  - **S6 Hub-Schema-Change** falls `/crashes`-Endpoint fehlt — Admin-Confirm vor Hub-Touch
+  - **mcp-go Lib-Eignungs-Bruch** in S1 → Alternative-Lib-Diskussion
+  - 🔴 Blocker-Findings, Architektur-Verzweigung, Token-Budget, Heartbeat-Fail (5a-Standard)
+- **Status:** offen — S1 wird belanna eröffnet
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Umbrella + Plan-Briefing 5a (Admin-Approval „alle geplanten Phasen durcharbeiten") + Branch `feat/phase-2-mcp` von `main@9536b12` angelegt. Routing S1 an belanna folgt.
 
 ---
 
