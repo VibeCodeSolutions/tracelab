@@ -1,10 +1,11 @@
 // Command tracelab is the Tracelab CLI.
 //
-// Phase 2a / Stage 5: `sessions`, `tail`, and `adb` are wired end-to-end
+// Phase 2a (final): `sessions`, `tail`, and `adb` are wired end-to-end
 // against the shared client (internal/client/) and the config-discovery
-// helper (internal/cliconfig/). `adb` drives the hub's new /adb/* HTTP
-// endpoints (ADR-004 Option B). `run` remains a stub; real behaviour
-// lands in S6 (pending ADR-005).
+// helper (internal/cliconfig/). `adb` drives the hub's /adb/* HTTP
+// endpoints (ADR-004 = Option B). Daemon management lives in the
+// `tracelab-hub` binary itself — the CLI is a pure consumer
+// (ADR-005 = Option C, S6 dropped).
 package main
 
 import (
@@ -41,7 +42,6 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().String("token", "",
 		"bearer token (overrides $TRACELAB_TOKEN and [auth].token from tracelab.toml)")
 
-	root.AddCommand(newRunCmd())
 	root.AddCommand(newTailCmd())
 	root.AddCommand(newSessionsCmd())
 	root.AddCommand(newADBCmd())

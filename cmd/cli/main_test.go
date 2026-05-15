@@ -6,9 +6,9 @@ import (
 )
 
 // TestRootCommandRegistersAllSubCommands is a structural smoke test: it
-// builds the root command and asserts that each sub-command stub the S1
-// skeleton ships is registered by name. No help-output parsing, no
-// invocation — those land once the stubs gain real behaviour.
+// builds the root command and asserts that each sub-command is registered
+// by name. `run` was dropped at the Phase-2a-Closure per ADR-005 = Option C
+// (CLI is a pure consumer; `tracelab-hub` is the daemon entrypoint).
 func TestRootCommandRegistersAllSubCommands(t *testing.T) {
 	t.Parallel()
 	root := newRootCmd()
@@ -16,7 +16,7 @@ func TestRootCommandRegistersAllSubCommands(t *testing.T) {
 		t.Fatalf("root.Use = %q, want %q", got, want)
 	}
 
-	want := []string{"adb", "run", "sessions", "tail"}
+	want := []string{"adb", "sessions", "tail"}
 
 	got := make([]string, 0, len(root.Commands()))
 	for _, c := range root.Commands() {
