@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (Umbrella eröffnet, S1 in Vorbereitung)
+status: phase-2b-laufend (S1 Skeleton + ARCH-Vorab in Arbeit)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260514-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#017 Phase-2b MCP-Server (Umbrella)"
+aktiver-auftrag: "#018 P2b-S1 Skeleton + ARCH-Vorab"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,35 @@ aktiver-auftrag: "#017 Phase-2b MCP-Server (Umbrella)"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #018 — Tracelab P2b-S1 — Skeleton + ARCH-Vorab
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** belanna
+- **An:** ballard
+- **Quelle-Kette:** Admin → Chakotay → belanna → ballard
+- **Auftrag:** Erster Sub-Sprint Phase 2b. `cmd/mcp/main.go` Skeleton mit `mcp-go`, leere Tool-Stubs (sessions/tail/crashes/adb), `--version`-Flag analog hub+cli, Makefile-Target `mcp` mit Cross-Compile, ARCH-Vorab (ADR-006 voll + ADR-007 als Skelett).
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S1)
+  - **Branch:** `feat/phase-2-mcp` von `main@9536b12`
+- **DoD S1:**
+  - `cmd/mcp/main.go` baut → `tracelab-mcp` Binary, cross-compiled Linux+Windows ohne CGO
+  - mcp-go-Server-Init + 4 Tool-Stubs (Names placeholder, kein Behavior — S2 entscheidet Naming)
+  - `--version`-Flag (LDFLAGS-Pattern wie hub+cli, gemeinsame `VERSION`-Variable im Makefile)
+  - ARCH-Doku in `docs/ARCH.md` Phase-2b-Sektion:
+    - **ADR-006** voll: Lib-Wahl `mcp-go` mit Considered/Rejected
+    - **ADR-007 als Skelett**: 4 Tool-Sektionen Platzhalter, final-fill in S2; mit Vermerk **„S6-Risiko: `/crashes`-Hub-Endpoint fehlt → Hub-Schema-Change analog 2a-S5/ADR-004 nötig"** (Pre-Check belanna 2026-05-15 bestätigt)
+  - `go vet ./...` clean, `go test -race ./...` repo-weit grün
+  - mindestens 1 Smoke-Test für `cmd/mcp` (Build + `--version` Output)
+- **Auto-Stop S1:** falls mcp-go-Lib substantielle Lücke (z.B. fehlende Streaming-Tool-Support für tail) → Eskalation an chakotay mit Alternativen.
+- **Worker-Brief-Disziplin (PFLICHT):**
+  - Trance-Bruch-Cross-Check-Scope EXPLIZIT breit: alle Dateien im Sprint-Touch-Scope inkl. Package-Doc + Const-Blocks + Smoke-Test-Doc (Lesson Cross-Check-Scope #013→#014→#015, 3× bestätigt)
+  - Phase-1+2a-Code unangetastet außer Makefile (LDFLAGS-Erweiterung) und ggf. `docs/ARCH.md`
+- **Status:** offen — Lead-Direktarbeit ADR-006 läuft, Worker-Spawn ballard folgt für Code
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — belanna: Auftrag empfangen, `/crashes`-Pre-Check Lead-Direktarbeit: Endpoint fehlt am Hub, Store-Tabelle vorhanden (`internal/store/sqlite.go:397` Kommentar „future /crashes API"). S6-Auto-Stop-Risiko in ADR-007 dokumentieren.
 
 ---
 

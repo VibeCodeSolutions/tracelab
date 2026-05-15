@@ -264,9 +264,80 @@ shapes stay byte-identical across endpoints.
 
 ---
 
-## Phase 2b — MCP server (placeholder)
+## Phase 2b — `tracelab-mcp` MCP server
 
-ADR pending — written at start of Phase 2b. Will reuse `internal/client/`.
+Roadmap: `~/.claude/plans/tracelab-phase-2b-mcp.md` (sub-plan of the Phase-2
+roadmap). Sub-sprint cut: S1 skeleton + ARCH · S2 tool-schema-surface-cut ·
+S3 sessions · S4 tail · S5 adb · S6 crashes.
+
+The MCP server reuses `internal/client/` end-to-end — it must not re-implement
+the hub HTTP/WS API. The 4 tools (sessions / tail / crashes / adb) are thin
+adapters from MCP tool calls to `internal/client/` methods.
+
+#### ADR-006: MCP library = `github.com/mark3labs/mcp-go`
+
+**Decision:** Use `github.com/mark3labs/mcp-go` as the Go MCP-server library.
+
+**Why:**
+- Most mature MCP server implementation for Go at the time of the decision
+  (2026-05-15). Active maintenance, broad community adoption, used by
+  several published Go-based MCP servers.
+- Full server-side surface: tool registration with JSON-Schema validation,
+  resource handling, prompt registration, stdio + streamable HTTP transport.
+- Idiomatic Go API (handler funcs taking `context.Context` and typed
+  request/response structs) — fits the existing Tracelab style.
+
+**Considered & rejected:**
+- **`metoro-io/mcp-golang`** — smaller and less feature-complete at the time
+  of the decision; in particular the streaming / long-running-tool story is
+  thinner, which matters for the `tail` tool (see ADR-007 S2 placeholder).
+- **Hand-rolled JSON-RPC over stdio** — MCP is JSON-RPC 2.0 plus a
+  non-trivial message envelope (initialize handshake, capability
+  negotiation, tool/resource lifecycle). Hand-rolling means re-implementing
+  spec coverage and keeping it in sync with upstream MCP releases — that
+  workload competes with Tracelab's actual goal (logs/sessions/adb), so it
+  loses on opportunity cost.
+- **No official Anthropic Go SDK** as of 2026-05-15 — Anthropic ships
+  TypeScript and Python SDKs; Go is community-maintained territory.
+
+**Cost:** one new top-level transitive dependency. `mcp-go` itself has a
+small dep footprint (mainly `gorilla/mux` or stdlib `net/http`, both already
+acceptable for the project). To be confirmed by `go mod tidy` diff during
+S1 implementation; if the surface bloats noticeably the decision is
+revisited.
+
+**Open question (resolved in S2):** which MCP-go primitive expresses the
+`tail` stream — a single long-running tool call, a resource subscription,
+or a sequence of tool calls returning incremental chunks. Deferred to
+ADR-007 in S2 (explicit Auto-Stop per plan briefing).
+
+#### ADR-007: Tool surface (skeleton — finalised in S2)
+
+The MCP server exposes four tools, mirroring the CLI sub-commands so that
+Claude Code and the human operator drive Tracelab through the same mental
+model. Naming, exact signatures, and the tool-vs-resource decision for
+`tail` are an explicit Auto-Stop in Sub-Sprint S2.
+
+- **`sessions`** — list + get-by-id. Reuses `internal/client.ListSessions`.
+  No hub-side change.
+- **`tail`** — live event stream for a session (or all sessions). Reuses
+  `internal/client.Tail` (WebSocket). MCP-side shape (single streaming
+  tool call vs. resource subscription) is the S2 decision.
+- **`adb`** — devices / start / stop. Reuses the `/adb/*` HTTP surface
+  established in Phase 2a S5 (ADR-004 Option B). No hub-side change.
+- **`crashes`** — list crash events for a session. **⚠ S6 risk:** the hub
+  has no `/crashes` HTTP endpoint today (verified 2026-05-15 by `grep -rn
+  "/crashes" internal/http/`; the `crashes` table exists in `internal/
+  store/`, including migrations 0001 + 0002, and `internal/store/sqlite.go`
+  line 397 explicitly documents the gap with `// Used by tests and the
+  future /crashes API.`). S6 therefore needs an additive Hub-Schema-Change
+  (new HTTP endpoint reading from the existing store) — analogous to the
+  Phase-2a S5 / ADR-004 pattern. This is a registered Auto-Stop trigger in
+  the Phase-2b plan briefing; Admin-confirm is required before S6 starts.
+
+Tool naming convention, auth strategy (Bearer from `tracelab.toml` via
+shared `internal/cliconfig/`), and per-tool input/output schemas are
+written into this ADR during S2.
 
 ## Phase 2c — Dashboard (placeholder)
 
