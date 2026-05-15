@@ -1,13 +1,13 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-laufend (S5 QS-grün — 3 adb-Tools + Discriminator-Pass-Through live; S6 crashes als letzter Sub-Sprint mit Hub-Schema-Change + ADR-009 fällig)
+status: phase-2b-laufend (S6 eröffnet — crashes-MCP-Tool + Hub-`/crashes`-Endpoint + ADR-009; letzter Sub-Sprint vor Phase-2b-Sammel-Gate + FF-Merge)
 last-updated: 2026-05-15
 qs-letzter-lauf: qs-20260515-004
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
-aktiver-auftrag: "#022 P2b-S5 QS-grün — wartet auf Findings-Gate; S6 next"
+aktiver-auftrag: "#023 P2b-S6 crashes_list-Tool + Hub-/crashes-Endpoint"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -22,6 +22,40 @@ aktiver-auftrag: "#022 P2b-S5 QS-grün — wartet auf Findings-Gate; S6 next"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #023 — Tracelab P2b-S6 — `crashes_list`-Tool + Hub-`/crashes`-Endpoint + ADR-009
+
+- **Timestamp:** 2026-05-15T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (Pauschal-Confirm „weiter solange context unter 45%" deckt S6-Hub-Schema-Change) → Chakotay (Auto-Chain nach #022-Freigabe) → belanna
+- **Auftrag:** S6 von Phase 2b — **letzter Sub-Sprint vor Phase-2b-Closure**. `crashes_list`-MCP-Tool + neuer Hub-`GET /crashes`-Endpoint. Additive Hub-Schema-Mutation analog ADR-004/008-Pattern. Store-Layer existiert bereits (`crashes`-Tabelle + `UpsertCrash` aus Phase-1-S5), nur HTTP-Wrapper fehlt.
+  - **Umbrella-Ref:** #017 Phase-2b-Umbrella
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2b-mcp.md` (Sub-Sprint S6)
+  - **ADR-Ref bestehend:** ADR-007 (Tool-Surface Admin-confirmed) — `crashes_list` `{ session_id: string, limit?: number }` → `{ crashes: CrashEvent[] }` / `client.CrashesList` (neu), Bearer required, Hub-Endpoint `GET /crashes?session=…&limit=…` (neu). **ADR-009 NEU** für Hub-`/crashes`-Endpoint-Form (Query-Params, Response-Shape, Bearer-Check, Default/Max-Limit) — Pattern analog ADR-008 (Considered/Rejected, Wire-Compat-Statement falls additiv am Hub).
+  - **Branch:** `feat/phase-2-mcp` (aktiv, tip `c88ec9d`)
+- **DoD S6:**
+  - **ADR-009 in `docs/ARCH.md` VOR Code-Touch** — neuer ADR-Block, dokumentiert: Hub-`/crashes`-Endpoint-Form (Query-Params session required + limit optional, Response `{ crashes: CrashEvent[] }`, Bearer-Check, Default + Max-Limit). Considered/Rejected (analog ADR-008-Struktur).
+  - **Hub-Endpoint** `GET /crashes?session=<id>&limit=<n>` in `internal/http/server.go` (Bearer-30s-Sub-Router-Group) + Handler in `internal/http/handlers.go`. Default/Max-Limit als Const-Block.
+  - **Store-Query-Methode** neu in `internal/store/sqlite.go` (Vorschlag: `CrashesBySession(ctx, sessionID, limit)` o.ä. — Tabelle + UpsertCrash existieren bereits seit Phase-1-S5, nur Query-Methode + Tests neu). Default-Limit-Logik analog `EventsSince`.
+  - **Client-Methode** `internal/client.CrashesList(ctx, sessionID, limit)` (neu) — Bearer-Plumbing wie bestehende Methoden, httptest-Tests (happy, auth-fail, empty, malformed).
+  - **MCP-Tool** `cmd/mcp/crashes.go` analog `cmd/mcp/sessions.go`/`tail.go`/`adb.go`-Pattern (4. Anwendung des Tool-Templates). Input-Schema `{ session_id, limit? }`, defensive nil-slice für Empty-Stability.
+  - **Stub-Removal:** `crashes_stub` aus `stubTools`-Slice in `cmd/mcp/main.go` raus (Slice ist danach leer/wird entfernt). `want`-Slice in `main_test.go` aktualisiert auf finale Liste (alle 6 echten Tools: `adb_devices, adb_start, adb_stop, crashes_list, sessions_list, tail_since` sortiert — kein _stub mehr).
+  - **mcp-go-Smoke-Tests + Hub-Endpoint-Integration-Tests** analog S4 (Registered, Description, Schema, Tripwire, HandlerCallsHub, AuthFail, Empty-Stability + Hub-Test mit echter Store-Layer)
+  - `go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün
+  - **CrashEvent-DTO** in `internal/client/types.go` ergänzen falls nicht vorhanden (Felder analog `internal/store.Crash`-Struct)
+- **Mandat:**
+  - Worker-Spawn ballard empfohlen (Klasse `feature`, Hub+Store-Query+Client+MCP-Tool = substantiell, 4. Anwendung Tool-Template)
+  - **ADR-009-Skelett vor Code-Touch** (analog ADR-008 in #021)
+  - Cross-Check-Scope voll wie #020/#021/#022 (Lesson 7× bestätigt). Diesmal sind `internal/http`/`internal/store`/`cmd/hub` **wieder beteiligt** (S6 ist Hub-Mutation), aber `cmd/cli`/`internal/adb`/`internal/crash`/`internal/ws`/`internal/ingest`/`internal/cliconfig`/`internal/config` MÜSSEN 0 Lines bleiben.
+  - **Tool-Template-Promotion-Trigger erreicht (Belanna L7 sagt: bei 4. Anwendung → T5-Auslagerung in `30_Wissen/MCP-Tool-Skeleton.md`).** Belanna entscheidet, ob T5-Note in diesem Sprint oder als Folge-Aufgabe.
+- **Auto-Stop S6:** keine zusätzlichen über 5a-Default hinaus — Hub-Schema-Change ist mit diesem Auftrag bereits Admin-confirmed (Pauschal-Confirm).
+- **Nach S6-QS-grün:** Phase-2b-Sammel-Gate (zusätzliches `release-qs` über alle Sub-Sprints zusammen) + Admin-Confirm für FF-Merge `feat/phase-2-mcp` → `main`. Plan-Block-3 sieht das explizit so vor.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-15T (Eröffnung) — chakotay: Auto-Chain nach #022-Freigabe unter Admin-Pauschal-Confirm. S6 routet an belanna mit Hub-Touch-Mandat + ADR-009-Schreibauftrag. Tool-Template-Promotion-Trigger erreicht (4. Anwendung).
 
 ---
 
