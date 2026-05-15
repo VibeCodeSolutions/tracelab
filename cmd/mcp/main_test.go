@@ -2,33 +2,58 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/VibeCodeSolutions/tracelab/internal/client"
 )
 
-// TestNewServerConstructs is a structural smoke test: it builds the MCP
-// server and asserts the construction path itself doesn't panic. Phase 2b
-// S1 has no behaviour to test; this guards the registration wiring only.
-func TestNewServerConstructs(t *testing.T) {
+// newTestServer wires a *MCPServer against a httptest-backed hub. Tests
+// drive buildServer directly so they bypass cliconfig discovery (the
+// cliconfig path is exercised separately in internal/cliconfig). The
+// returned http test-server is closed via t.Cleanup.
+func newTestHubServer(t *testing.T, h http.Handler) *client.Client {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "test-token"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c
+}
+
+// TestBuildServerConstructs is a structural smoke test: it builds the
+// MCP server against a no-op hub client and asserts construction itself
+// doesn't panic.
+func TestBuildServerConstructs(t *testing.T) {
 	t.Parallel()
-	if s := newServer(); s == nil {
-		t.Fatal("newServer() returned nil")
+	c := newTestHubServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	if s := buildServer(c); s == nil {
+		t.Fatal("buildServer() returned nil")
 	}
 }
 
-// TestNewServerRegistersAllStubTools asserts the four placeholder tools
-// from stubTools are present in the server's tool registry by name.
-// Mirrors TestRootCommandRegistersAllSubCommands in cmd/cli for the CLI
-// side: registration is the only thing S1 promises.
-func TestNewServerRegistersAllStubTools(t *testing.T) {
+// TestServerRegistersExpectedTools asserts the real sessions_list tool
+// and the three remaining stub placeholders are present in the server's
+// tool registry. Sorted-name comparison gives deterministic failure
+// messages when a tool moves in or out.
+func TestServerRegistersExpectedTools(t *testing.T) {
 	t.Parallel()
-	s := newServer()
+	c := newTestHubServer(t, http.NotFoundHandler())
+	s := buildServer(c)
 	tools := s.ListTools()
 
-	want := []string{"adb_stub", "crashes_stub", "sessions_stub", "tail_stub"}
+	// Sorted alphabetically: adb_stub, crashes_stub, sessions_list,
+	// tail_stub. sessions_stub from the S1 skeleton has retired in S3.
+	want := []string{"adb_stub", "crashes_stub", "sessions_list", "tail_stub"}
 	got := make([]string, 0, len(tools))
 	for name := range tools {
 		got = append(got, name)
@@ -45,13 +70,14 @@ func TestNewServerRegistersAllStubTools(t *testing.T) {
 	}
 }
 
-// TestStubToolDescriptionsPresent guards against shipping a placeholder
-// without a description — analogous to TestRootCommandShortDescriptionsPresent
-// in cmd/cli. An empty Description silently regresses the tools/list UX
-// that human and CC operators rely on.
-func TestStubToolDescriptionsPresent(t *testing.T) {
+// TestToolDescriptionsPresent guards against shipping a tool without a
+// description — an empty Description silently regresses the tools/list
+// UX that human and CC operators rely on. Covers the real tool plus the
+// remaining stubs in one sweep.
+func TestToolDescriptionsPresent(t *testing.T) {
 	t.Parallel()
-	s := newServer()
+	c := newTestHubServer(t, http.NotFoundHandler())
+	s := buildServer(c)
 	for name, st := range s.ListTools() {
 		if strings.TrimSpace(st.Tool.Description) == "" {
 			t.Errorf("tool %q has empty Description", name)
@@ -59,9 +85,10 @@ func TestStubToolDescriptionsPresent(t *testing.T) {
 	}
 }
 
-// TestStubHandlerReturnsNotImplemented asserts every S1 handler returns a
-// structured "not implemented" error pointing at ADR-007. This is the
-// contract S2 will replace, so we pin the marker today.
+// TestStubHandlerReturnsNotImplemented asserts the remaining placeholder
+// handler returns a structured "not implemented" error pointing at
+// ADR-007. sessions_stub retired in S3 (covered by sessions_list tests
+// in sessions_test.go); the loop only walks the still-stubbed tools.
 func TestStubHandlerReturnsNotImplemented(t *testing.T) {
 	t.Parallel()
 	res, err := stubHandler(context.Background(), mcp.CallToolRequest{})
