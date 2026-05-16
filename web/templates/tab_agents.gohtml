@@ -1,11 +1,47 @@
 {{/*
-  tab_agents.gohtml — Agents tab placeholder.
+  tab_agents.gohtml — Agents tab placeholder (Phase 2c S5 polish).
 
-  S1: static placeholder with explicit Phase-2d bookmark. S5 polish keeps
-  the placeholder shape (no Phase-2c implementation); Phase 2d brings
-  the KI-Agenten-Stack data domain.
+  Phase 2c renders this tab as a non-clickable "coming soon" stub so the
+  tab navigation surfaces all four planned tabs from day one rather than
+  hiding the slot until 2d ships. The body documents what 2d will bring
+  so a returning user (or a future Claude-Code session reading the
+  rendered HTML) sees the roadmap without needing the plan file open.
+
+  Phase 2d (see ~/.claude/plans/tracelab-phase-2d-agents.md, drafted
+  after 2c-Closure) adds the KI-Agenten-Stack data domain on top of the
+  app-log domain that 2c covers: a second persistence shape (agent
+  spawn-tree rows), a second crash-equivalent (verdict + Lerneffekt
+  capture), and a cross-domain link (mailbox / crew traffic edges
+  joining the agent-tree to the live-tail event stream).
+
+  Dot value: nil — the template is fully static.
 */}}
-<section class="tl-tab-panel" data-tab="agents" role="tabpanel">
+<section class="tl-tab-panel tl-agents" data-tab="agents" role="tabpanel">
   <h2>Agents</h2>
-  <p class="tl-placeholder">Agents — Phase 2d (coming soon)</p>
+
+  <div class="tl-empty-state tl-coming-soon" role="status">
+    <p class="tl-empty-state-title">Phase 2d — coming soon</p>
+    <p class="tl-empty-state-body">
+      The Agents tab will surface the KI-Agenten-Stack as a second data
+      domain alongside the app-log surfaces of Phase 2c:
+    </p>
+    <ul class="tl-empty-state-list">
+      <li><strong>Skill-Spawn-Tree:</strong> visualises which skills
+        spawned which sub-skills inside a run, who reports up to whom.</li>
+      <li><strong>Token-Usage &amp; Duration:</strong> per-spawn token
+        cost, wall-clock duration, and budget burn-down so the cost of
+        a multi-agent run is visible end-to-end.</li>
+      <li><strong>Verdict &amp; Lerneffekt:</strong> the QS verdict
+        captured per spawn (freigabe / rückgabe / eskalation) plus the
+        post-run Lerneffekt note for the persona memory layer.</li>
+      <li><strong>Mailbox &amp; Crew-Traffic edges:</strong>
+        cross-references between the agent tree and the live-tail event
+        stream so a crashing app surface can be traced back to the agent
+        spawn that ran it.</li>
+    </ul>
+    <p class="tl-empty-state-footer tl-muted">
+      Tracked in <code>~/.claude/plans/tracelab-phase-2d-agents.md</code>
+      after the Phase 2c FF-merge.
+    </p>
+  </div>
 </section>
