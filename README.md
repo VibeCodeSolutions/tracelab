@@ -60,10 +60,17 @@ the token with `openssl rand -hex 32`.
 | GET    | `/events`        | yes  | Forward-cursor read: `?session=<id>&since_seq=<n>&limit=<n>` returns `{events, next_since_seq}` (Phase 2b S4, ADR-008). |
 | GET    | `/crashes`       | yes  | Session-scoped crash digest, newest first: `?session=<id>&limit=<n>` returns `{crashes}` (Phase 2b S6, ADR-009). |
 | GET    | `/tail`          | yes  | WebSocket fan-out, optional `?session=<id>` filter. |
-| GET    | `/dashboard`     | no¹  | Web dashboard (Phase 2c S1 skeleton). Optional `?tab=<slug>` (`live-tail`/`sessions`/`crashes`/`agents`). |
-| GET    | `/dashboard/tab/{slug}` | no¹ | Tab body for htmx partial-swap. |
-| GET    | `/dashboard/static/*`   | no¹ | Embedded JS/CSS (htmx, dashboard.css). |
-| GET    | `/dashboard/stream`     | no¹ | SSE live-tail stream: `?session=<id>` required. `text/event-stream` with `data: <json>\n\n` frames (Phase 2c S2, ADR-012). |
+| GET    | `/adb/devices`   | yes  | List attached Android devices (`adb devices -l` wrapper, Phase 2a S5, ADR-004). |
+| POST   | `/adb/start`     | yes  | Start the adb logcat bridge for a device (returns the new `session_id`). |
+| POST   | `/adb/stop`      | yes  | Stop the active adb logcat bridge (204 on success). |
+| GET    | `/dashboard`     | no¹  | Web dashboard layout (Phase 2c S1). Optional `?tab=<slug>` (`live-tail`/`sessions`/`crashes`/`agents`). |
+| GET    | `/dashboard/tab/sessions`      | no¹ | Sessions-browser tab body: table with sort/filter/pagination (Phase 2c S3). |
+| GET    | `/dashboard/tab/sessions/{id}` | no¹ | Session detail-view body (events list, Phase 2c S3 + S5 defense-in-depth). |
+| GET    | `/dashboard/tab/crashes`       | no¹ | Crashes-inspector tab body: per-fingerprint rows with top-frames preview (Phase 2c S4). |
+| GET    | `/dashboard/tab/crashes/{id}`  | no¹ | Crash detail-view body (full stacktrace, Phase 2c S4). |
+| GET    | `/dashboard/tab/{slug}`        | no¹ | Generic tab body for htmx partial-swap (live-tail, agents stub). |
+| GET    | `/dashboard/static/*`          | no¹ | Embedded JS/CSS (htmx, htmx-ext-sse, dashboard.css). |
+| GET    | `/dashboard/stream`            | no¹ | SSE live-tail stream: `?session=<id>` required. `text/event-stream` with `data: <json>\n\n` frames (Phase 2c S2, ADR-012). |
 
 ¹ The dashboard sub-router is **permanently Loopback-only**
 (Admin-Confirm 2026-05-16, ADR-011 *Consequences*). Browsers cannot

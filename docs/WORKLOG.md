@@ -59,6 +59,7 @@ aktiver-auftrag: "#030 — Phase-2-Tail (5 Pakete M1-M10 + VC-029-WAR + Sammel-G
 - **Status:** offen
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Tail-Sprint-Skelett (5 Pakete + Sammel-Gate, Defaults aus Phase-1-Tail-Pattern). Routet an belanna mit Mandat. Phase 2d steht in Auftragsbeschreibung als Folge-Auftrag (post-Merge).
+  - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 5 thematischen Paketen (P1 Docs / P2 http / P3 crash / P4 store+adb / P5 design). Branch chore/phase-2-tail von main@9829679. Worker-Spawn ballard für alle 5 Pakete linear, kein Auto-Stop zwischen ihnen außer P4-UNIQUE-Migration-Frage. Sammel-Gate Tuvok nach Worker-Done.
 
 ---
 
