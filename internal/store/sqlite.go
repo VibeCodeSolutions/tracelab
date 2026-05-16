@@ -718,3 +718,190 @@ func (s *Store) SessionByID(ctx context.Context, id string) (Session, error) {
 	}
 	return sess, nil
 }
+
+// CrashSort enumerates the allowed sort keys for ListCrashes. Mirrors
+// SessionSort: a typed closed set so the dashboard handler can pass it
+// through a whitelist check at the HTTP boundary without restating SQL.
+type CrashSort int
+
+const (
+	// SortCrashTSDesc — newest first (default). Matches the natural
+	// "what crashed last" reading order.
+	SortCrashTSDesc CrashSort = iota
+	// SortCrashTSAsc — oldest first.
+	SortCrashTSAsc
+	// SortCrashCountDesc — most-frequent fingerprints first. Useful for
+	// triaging recurring bugs.
+	SortCrashCountDesc
+	// SortCrashFingerprintAsc — lexicographic fingerprint sort, gives a
+	// deterministic browse order independent of timestamps.
+	SortCrashFingerprintAsc
+)
+
+// ListCrashesOpts bundles optional list parameters for the Phase 2c S4
+// crash-inspector tab. Zero values map to "newest first, no session
+// filter, no offset, default limit". Sort is the typed enum above
+// (whitelisted SQL form); FilterSessionID restricts the result set to
+// crashes from a single session when non-empty.
+//
+// Note on dedup: the `crashes` table already enforces UNIQUE(session_id,
+// fingerprint) — UpsertCrash bumps `count` and refreshes `ts` for
+// existing fingerprints — so a plain SELECT already returns deduplicated
+// rows. No GROUP BY needed.
+type ListCrashesOpts struct {
+	Limit           int
+	Offset          int
+	FilterSessionID string
+	Sort            CrashSort
+}
+
+// ListCrashes returns up to opts.Limit deduplicated crash rows across
+// all sessions (or restricted to FilterSessionID when set), applying the
+// typed sort order and pagination offset. Backs the Phase 2c S4
+// crash-inspector tab.
+//
+// Aggregate-counts strategy: none needed — the table already stores one
+// row per (session_id, fingerprint) via UpsertCrash's tx-guarded
+// SELECT-then-UPDATE/INSERT. The `count` column on each row is the live
+// occurrence counter; `ts` is the timestamp of the most recent
+// occurrence. Indexes idx_crashes_session_ts and idx_crashes_fingerprint
+// cover the filter+sort combinations cheaply.
+//
+// limit <= 0 falls back to a 50 default (mirrors the sessions tab).
+// Empty result is `nil, nil`.
+func (s *Store) ListCrashes(ctx context.Context, opts ListCrashesOpts) ([]CrashRow, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Whitelisted ORDER BY clause. Default branch covers any future
+	// enum addition that forgets to extend this switch.
+	var orderBy string
+	switch opts.Sort {
+	case SortCrashTSAsc:
+		orderBy = "ts ASC, id ASC"
+	case SortCrashCountDesc:
+		orderBy = "count DESC, ts DESC, id DESC"
+	case SortCrashFingerprintAsc:
+		orderBy = "fingerprint ASC, ts DESC, id DESC"
+	case SortCrashTSDesc:
+		fallthrough
+	default:
+		orderBy = "ts DESC, id DESC"
+	}
+
+	var (
+		query string
+		args  []any
+	)
+	const baseSelect = `
+		SELECT id, session_id, ts, fingerprint, stacktrace, count
+		FROM crashes
+	`
+	if opts.FilterSessionID != "" {
+		query = baseSelect + ` WHERE session_id = ? ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
+		args = []any{opts.FilterSessionID, limit, offset}
+	} else {
+		query = baseSelect + ` ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
+		args = []any{limit, offset}
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list crashes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CrashRow
+	for rows.Next() {
+		var c CrashRow
+		var tsNano int64
+		if err := rows.Scan(&c.ID, &c.SessionID, &tsNano, &c.Fingerprint, &c.Stacktrace, &c.Count); err != nil {
+			return nil, fmt.Errorf("store: scan crash: %w", err)
+		}
+		c.TS = time.Unix(0, tsNano)
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows crash: %w", err)
+	}
+	return out, nil
+}
+
+// CountCrashes returns the total number of crash rows, optionally
+// restricted to a single session. Backs the Phase 2c S4 crash-inspector
+// tab's pagination control (page count = ceil(total / limit)).
+func (s *Store) CountCrashes(ctx context.Context, filterSessionID string) (int64, error) {
+	var (
+		query string
+		args  []any
+	)
+	if filterSessionID != "" {
+		query = `SELECT COUNT(*) FROM crashes WHERE session_id = ?`
+		args = []any{filterSessionID}
+	} else {
+		query = `SELECT COUNT(*) FROM crashes`
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count crashes: %w", err)
+	}
+	return n, nil
+}
+
+// CrashByID returns a single crash row identified by its autoincrement
+// id. Returns sql.ErrNoRows if no row exists, so the dashboard's
+// crash-detail view can map cleanly to 404. Used by Phase 2c S4.
+func (s *Store) CrashByID(ctx context.Context, id int64) (CrashRow, error) {
+	var c CrashRow
+	var tsNano int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, session_id, ts, fingerprint, stacktrace, count
+		FROM crashes
+		WHERE id = ?
+	`, id).Scan(&c.ID, &c.SessionID, &tsNano, &c.Fingerprint, &c.Stacktrace, &c.Count)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CrashRow{}, sql.ErrNoRows
+		}
+		return CrashRow{}, fmt.Errorf("store: crash by id: %w", err)
+	}
+	c.TS = time.Unix(0, tsNano)
+	return c, nil
+}
+
+// ListSessionIDsWithCrashes returns the distinct session ids that have
+// at least one crash row, ordered lexicographically. Backs the
+// crash-inspector tab's session-filter dropdown: the user picks from
+// "sessions that actually have crashes" rather than the full sessions
+// table.
+//
+// Result is `nil, nil` when no crashes exist anywhere — the caller
+// renders the dropdown as a single "all sessions" entry in that case.
+func (s *Store) ListSessionIDsWithCrashes(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT session_id FROM crashes ORDER BY session_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list crash session ids: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scan crash session id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows crash session id: %w", err)
+	}
+	return out, nil
+}
