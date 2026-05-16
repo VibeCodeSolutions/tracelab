@@ -198,28 +198,35 @@ func TestDetectRustHeaderlessBacktraceStillMatches(t *testing.T) {
 	}
 }
 
-// TestDetectRustDefaultPanicWithoutBacktraceIsKnownGap is a probe test
-// for the qs-20260510-003 M6 finding: the default Rust runtime panic
-// emitted WITHOUT `RUST_BACKTRACE=1` (header + payload + `note: run with
-// RUST_BACKTRACE=1 ...`) is not matched today, because all three branches
-// of isRust require either an indented `at`-line or a numbered frame —
-// neither of which appears in this shape.
-//
-// The test is intentionally Skip'd: it documents the gap and the exact
-// payload to handle. When isRust grows a fourth branch (header + `note:`
-// fallback or similar), drop the t.Skip line and the assertion below
-// turns green automatically.
-func TestDetectRustDefaultPanicWithoutBacktraceIsKnownGap(t *testing.T) {
-	t.Skip("known gap (qs-20260510-003 M6): header + `note: RUST_BACKTRACE=1` shape not yet detected — see isRust doc-comment")
+// TestDetectRustDefaultPanicWithoutBacktrace pins the qs-20260510-003 M6
+// branch (d): the default Rust runtime panic emitted WITHOUT
+// `RUST_BACKTRACE=1` (header + payload + `note: run with RUST_BACKTRACE=1
+// ...`) MUST match. The runtime appends the note-line itself, so its
+// presence guards against the K1 false-positive class while letting the
+// otherwise stack-less default panic be detected.
+func TestDetectRustDefaultPanicWithoutBacktrace(t *testing.T) {
 	msg := "thread 'main' panicked at src/foo.rs:10:5:\n" +
 		"noops\n" +
 		"note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
 	r := Detect("app", "ERROR", msg, nil)
 	if !r.Matched {
-		t.Fatalf("default Rust panic should match once the heuristic is added, got Matched=false")
+		t.Fatalf("default Rust panic should match via branch (d), got Matched=false")
 	}
 	if r.Language != LangRust {
 		t.Errorf("language = %q, want %q", r.Language, LangRust)
+	}
+}
+
+// TestDetectRustChattyHeaderWithoutNoteStillRejects guards against
+// regression of the K1 false-positive class: a header-only chatty log
+// line (no `at`-frame, no numbered frame, no `stack backtrace:`, no
+// runtime note-line) must NOT match. The runtime-note literal is what
+// makes branch (d) safe.
+func TestDetectRustChattyHeaderWithoutNoteStillRejects(t *testing.T) {
+	msg := "thread 'tokio-worker-3' panicked at handling request (status=500)"
+	r := Detect("app", "WARN", msg, nil)
+	if r.Matched {
+		t.Errorf("chatty header-only log must not match (K1 regression), got Language=%q", r.Language)
 	}
 }
 
