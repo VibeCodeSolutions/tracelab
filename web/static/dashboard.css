@@ -436,6 +436,13 @@ html, body {
   .tl-tab-panel th,
   .tl-tab-panel td    { padding: 0.45rem 0.5rem; }
 
+  /* Mono blocks (live-tail output + crash stacktrace) honour the
+   * promised 14 px floor on phones (VC-029-WAR). Desktop default is
+   * 0.85rem = 13.6 px which the desktop-block comments already mark
+   * "bumped to 14 below in @media" — that bump now actually exists. */
+  .tl-live-output,
+  .tl-stacktrace      { font-size: 0.875rem; }      /* 14 px exact */
+
   /* Frames-preview can wrap on a phone — the desktop ellipsis is
    * unfriendly to a touch-scroll user. */
   .tl-frames-preview li {
