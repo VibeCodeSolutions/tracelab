@@ -615,3 +615,249 @@ func TestCrashesBySessionCrossSessionIsolation(t *testing.T) {
 		}
 	}
 }
+
+// TestListSessionsWithCounts_HappyPath seeds three sessions with varying
+// event and crash counts and asserts ListSessionsWithCounts returns the
+// counts correctly wired up. Phase 2c S3 — covers the COUNT-Subquery
+// join path against the existing FK indexes.
+func TestListSessionsWithCounts_HappyPath(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	a, err := s.CreateSession(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("CreateSession a: %v", err)
+	}
+	b, err := s.CreateSession(ctx, "session-b")
+	if err != nil {
+		t.Fatalf("CreateSession b: %v", err)
+	}
+	c, err := s.CreateSession(ctx, "session-c")
+	if err != nil {
+		t.Fatalf("CreateSession c: %v", err)
+	}
+
+	// 3 events for a, 1 for b, 0 for c.
+	if err := s.InsertEvents(ctx, a, []Event{
+		{Source: "x", Level: "info", Msg: "1"},
+		{Source: "x", Level: "info", Msg: "2"},
+		{Source: "x", Level: "info", Msg: "3"},
+	}); err != nil {
+		t.Fatalf("insert a events: %v", err)
+	}
+	if err := s.InsertEvents(ctx, b, []Event{
+		{Source: "x", Level: "info", Msg: "b-1"},
+	}); err != nil {
+		t.Fatalf("insert b events: %v", err)
+	}
+
+	// 2 crashes for a (different fingerprints), 0 elsewhere.
+	if err := s.UpsertCrash(ctx, a, time.Now(), "fp-a-1", "stack a1"); err != nil {
+		t.Fatalf("upsert crash a1: %v", err)
+	}
+	if err := s.UpsertCrash(ctx, a, time.Now(), "fp-a-2", "stack a2"); err != nil {
+		t.Fatalf("upsert crash a2: %v", err)
+	}
+
+	got, err := s.ListSessionsWithCounts(ctx, ListSessionsOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSessionsWithCounts: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 sessions, got %d", len(got))
+	}
+
+	byID := map[string]SessionWithCounts{}
+	for _, sc := range got {
+		byID[sc.ID] = sc
+	}
+	if byID[a].EventCount != 3 {
+		t.Errorf("a event_count: want 3, got %d", byID[a].EventCount)
+	}
+	if byID[a].CrashCount != 2 {
+		t.Errorf("a crash_count: want 2, got %d", byID[a].CrashCount)
+	}
+	if byID[b].EventCount != 1 || byID[b].CrashCount != 0 {
+		t.Errorf("b counts: want event=1 crash=0, got event=%d crash=%d",
+			byID[b].EventCount, byID[b].CrashCount)
+	}
+	if byID[c].EventCount != 0 || byID[c].CrashCount != 0 {
+		t.Errorf("c counts: want event=0 crash=0, got event=%d crash=%d",
+			byID[c].EventCount, byID[c].CrashCount)
+	}
+}
+
+// TestListSessionsWithCounts_SortVariants exercises each SessionSort
+// branch, asserting the relative order of two sessions changes with
+// the sort key.
+func TestListSessionsWithCounts_SortVariants(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create older first, newer second so started_at sort is observable.
+	older, err := s.CreateSession(ctx, "older")
+	if err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond) // nanosecond resolution + tx fudge
+	newer, err := s.CreateSession(ctx, "newer")
+	if err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	// Make `older` have more events than `newer`.
+	if err := s.InsertEvents(ctx, older, []Event{
+		{Source: "x", Level: "info", Msg: "1"},
+		{Source: "x", Level: "info", Msg: "2"},
+	}); err != nil {
+		t.Fatalf("insert older events: %v", err)
+	}
+	if err := s.InsertEvents(ctx, newer, []Event{
+		{Source: "x", Level: "info", Msg: "n"},
+	}); err != nil {
+		t.Fatalf("insert newer events: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		sort      SessionSort
+		wantFirst string
+	}{
+		{"started_at_desc", SortSessionStartedAtDesc, newer},
+		{"started_at_asc", SortSessionStartedAtAsc, older},
+		{"event_count_desc", SortSessionEventCountDesc, older},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.ListSessionsWithCounts(ctx, ListSessionsOpts{
+				Limit: 10,
+				Sort:  tc.sort,
+			})
+			if err != nil {
+				t.Fatalf("ListSessionsWithCounts: %v", err)
+			}
+			if len(got) != 2 {
+				t.Fatalf("want 2 sessions, got %d", len(got))
+			}
+			if got[0].ID != tc.wantFirst {
+				t.Errorf("first id: want %q, got %q (full: %+v)",
+					tc.wantFirst, got[0].ID, got)
+			}
+		})
+	}
+}
+
+// TestListSessionsWithCounts_FilterAndPagination covers the
+// FilterIDSubstring + Limit + Offset code path.
+func TestListSessionsWithCounts_FilterAndPagination(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Insert 5 sessions; we'll filter on the first session id's prefix
+	// to verify the LIKE %…% wiring, and paginate over the unfiltered
+	// total to verify offset + limit.
+	ids := make([]string, 0, 5)
+	for i := 0; i < 5; i++ {
+		id, err := s.CreateSession(ctx, fmt.Sprintf("s-%d", i))
+		if err != nil {
+			t.Fatalf("create s-%d: %v", i, err)
+		}
+		ids = append(ids, id)
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Filter on a unique substring of ids[0] — all 26 hex chars are
+	// unique to that session.
+	got, err := s.ListSessionsWithCounts(ctx, ListSessionsOpts{
+		Limit:             10,
+		FilterIDSubstring: ids[0],
+	})
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != ids[0] {
+		t.Fatalf("filter on ids[0]: got %+v", got)
+	}
+
+	// Pagination: limit 2 + offset 0 returns the 2 newest;
+	// limit 2 + offset 2 returns the next 2.
+	first, err := s.ListSessionsWithCounts(ctx, ListSessionsOpts{Limit: 2})
+	if err != nil {
+		t.Fatalf("page 1: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("page 1: want 2, got %d", len(first))
+	}
+	second, err := s.ListSessionsWithCounts(ctx, ListSessionsOpts{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("page 2: %v", err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("page 2: want 2, got %d", len(second))
+	}
+	// First and second pages must not overlap.
+	for _, a := range first {
+		for _, b := range second {
+			if a.ID == b.ID {
+				t.Errorf("page 1 and page 2 overlap on id %q", a.ID)
+			}
+		}
+	}
+}
+
+// TestCountSessions verifies the pagination total-count helper.
+func TestCountSessions(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		if _, err := s.CreateSession(ctx, fmt.Sprintf("s-%d", i)); err != nil {
+			t.Fatalf("create s-%d: %v", i, err)
+		}
+	}
+
+	total, err := s.CountSessions(ctx, "")
+	if err != nil {
+		t.Fatalf("CountSessions: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("total: want 4, got %d", total)
+	}
+
+	// All session ids start with hex digits — "0" through "f" — so
+	// filter on a single hex char will match some but not all.
+	one, err := s.CreateSession(ctx, "extra")
+	if err != nil {
+		t.Fatalf("create extra: %v", err)
+	}
+	matchTotal, err := s.CountSessions(ctx, one)
+	if err != nil {
+		t.Fatalf("CountSessions filter: %v", err)
+	}
+	if matchTotal != 1 {
+		t.Errorf("filter on extra id: want 1 match, got %d", matchTotal)
+	}
+}
+
+// TestSessionByID covers the happy + 404 paths for the detail-view
+// existence probe.
+func TestSessionByID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateSession(ctx, "detail-target")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	got, err := s.SessionByID(ctx, id)
+	if err != nil {
+		t.Fatalf("SessionByID: %v", err)
+	}
+	if got.ID != id || got.Label != "detail-target" {
+		t.Errorf("session round-trip: got %+v", got)
+	}
+
+	if _, err := s.SessionByID(ctx, "does-not-exist"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown id: want sql.ErrNoRows, got %v", err)
+	}
+}

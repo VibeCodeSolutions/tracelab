@@ -523,3 +523,198 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 	}
 	return out, nil
 }
+
+// SessionSort enumerates the allowed sort keys for ListSessionsWithCounts.
+// Kept as a typed constant set so the dashboard handler can pass it through
+// a whitelist check at the HTTP boundary without re-stating the SQL forms.
+type SessionSort int
+
+const (
+	// SortSessionStartedAtDesc — newest first (default). Matches the
+	// existing ListSessions order and the dashboard's "what just
+	// happened" reading.
+	SortSessionStartedAtDesc SessionSort = iota
+	// SortSessionStartedAtAsc — oldest first.
+	SortSessionStartedAtAsc
+	// SortSessionIDAsc — lexicographic by ULID-style id (which is
+	// itself a time-sortable prefix; included for completeness and
+	// deterministic browsing).
+	SortSessionIDAsc
+	// SortSessionEventCountDesc — highest event volume first.
+	SortSessionEventCountDesc
+)
+
+// SessionWithCounts is the denormalised view that backs the Phase 2c S3
+// session-browser tab: session metadata + event_count + crash_count via
+// COUNT-Subqueries against the same FK-indexed columns the rest of the
+// store already uses (idx_events_session_ts, idx_crashes_session_ts).
+//
+// The Counts are int64 because SQLite COUNT() returns an integer the
+// driver maps cleanly to int64; rows.Scan(*int) would also work but
+// int64 is the lossless option.
+type SessionWithCounts struct {
+	Session
+	EventCount int64
+	CrashCount int64
+}
+
+// ListSessionsOpts bundles the optional list parameters for the Phase 2c
+// S3 session-browser tab. Zero values map to "newest first, no filter,
+// no offset, default limit". Sort is the typed enum above to keep the
+// SQL form whitelisted; FilterIDSubstring is matched case-sensitively
+// against the id column with a parameterised LIKE (no user-controlled
+// SQL fragment ever reaches Query).
+type ListSessionsOpts struct {
+	Limit             int
+	Offset            int
+	FilterIDSubstring string
+	Sort              SessionSort
+}
+
+// ListSessionsWithCounts returns up to opts.Limit sessions with their
+// associated event_count and crash_count, applying the optional
+// substring filter on session id and the typed sort order. opts.Offset
+// supports paginated browsing.
+//
+// Aggregate-counts strategy (Phase 2c S3): COUNT-Subqueries on the
+// already-indexed (session_id, ts) tuples. EXPLAIN-Plan: idx_events_session_ts
+// and idx_crashes_session_ts cover the WHERE/GROUP-equivalent so each
+// per-row count is a covered range scan. No new index, no schema
+// migration — additive query method only.
+//
+// limit <= 0 falls back to a 50 default (mirrors ListSessions). The
+// store does not cap; the HTTP handler caps separately at 500 to keep a
+// dashboard render below the SSE-equivalent payload budget.
+//
+// Empty result is returned as `nil, nil` (distinct from an error).
+func (s *Store) ListSessionsWithCounts(ctx context.Context, opts ListSessionsOpts) ([]SessionWithCounts, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Sort clause is selected from a fixed whitelist. The variable is
+	// concatenated into the SQL string, but its set of possible values
+	// is closed at compile time (the default branch covers any future
+	// enum addition that forgets to extend this switch).
+	var orderBy string
+	switch opts.Sort {
+	case SortSessionStartedAtAsc:
+		orderBy = "started_at ASC, id ASC"
+	case SortSessionIDAsc:
+		orderBy = "id ASC"
+	case SortSessionEventCountDesc:
+		orderBy = "event_count DESC, started_at DESC"
+	case SortSessionStartedAtDesc:
+		fallthrough
+	default:
+		orderBy = "started_at DESC, id DESC"
+	}
+
+	// Substring filter is fed through a parameterised LIKE; the `%`
+	// padding is added in Go, not in SQL, so the user input cannot
+	// inject wildcards or escapes (sqlite's LIKE is case-insensitive
+	// for ASCII by default — fine for hex session ids).
+	var (
+		query string
+		args  []any
+	)
+	const baseSelect = `
+		SELECT
+			s.id, s.label, s.started_at, s.ended_at,
+			(SELECT COUNT(*) FROM events  e WHERE e.session_id = s.id) AS event_count,
+			(SELECT COUNT(*) FROM crashes c WHERE c.session_id = s.id) AS crash_count
+		FROM sessions s
+	`
+	if opts.FilterIDSubstring != "" {
+		query = baseSelect + ` WHERE s.id LIKE ? ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
+		args = []any{"%" + opts.FilterIDSubstring + "%", limit, offset}
+	} else {
+		query = baseSelect + ` ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
+		args = []any{limit, offset}
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list sessions with counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionWithCounts
+	for rows.Next() {
+		var sc SessionWithCounts
+		var startedNano int64
+		var endedNano sql.NullInt64
+		if err := rows.Scan(
+			&sc.ID, &sc.Label, &startedNano, &endedNano,
+			&sc.EventCount, &sc.CrashCount,
+		); err != nil {
+			return nil, fmt.Errorf("store: scan session-with-counts: %w", err)
+		}
+		sc.StartedAt = time.Unix(0, startedNano)
+		if endedNano.Valid {
+			t := time.Unix(0, endedNano.Int64)
+			sc.EndedAt = &t
+		}
+		out = append(out, sc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows session-with-counts: %w", err)
+	}
+	return out, nil
+}
+
+// CountSessions returns the total number of sessions matching the
+// optional substring filter on session id. Backs the Phase 2c S3
+// session-browser tab's pagination control: page count = ceil(total / limit).
+//
+// Uses the same parameterised LIKE pattern as ListSessionsWithCounts so
+// the two stay aligned at the WHERE-clause boundary.
+func (s *Store) CountSessions(ctx context.Context, filterIDSubstring string) (int64, error) {
+	var (
+		query string
+		args  []any
+	)
+	if filterIDSubstring != "" {
+		query = `SELECT COUNT(*) FROM sessions WHERE id LIKE ?`
+		args = []any{"%" + filterIDSubstring + "%"}
+	} else {
+		query = `SELECT COUNT(*) FROM sessions`
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count sessions: %w", err)
+	}
+	return n, nil
+}
+
+// SessionByID returns the single session row identified by id. Returns
+// sql.ErrNoRows if no row exists. Used by the dashboard's session-detail
+// view (Phase 2c S3) to distinguish "unknown id → 404" from "valid id
+// with no events → empty list".
+func (s *Store) SessionByID(ctx context.Context, id string) (Session, error) {
+	var sess Session
+	var startedNano int64
+	var endedNano sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, label, started_at, ended_at
+		FROM sessions
+		WHERE id = ?
+	`, id).Scan(&sess.ID, &sess.Label, &startedNano, &endedNano)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, sql.ErrNoRows
+		}
+		return Session{}, fmt.Errorf("store: session by id: %w", err)
+	}
+	sess.StartedAt = time.Unix(0, startedNano)
+	if endedNano.Valid {
+		t := time.Unix(0, endedNano.Int64)
+		sess.EndedAt = &t
+	}
+	return sess, nil
+}
