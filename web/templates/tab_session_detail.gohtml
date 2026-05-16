@@ -31,28 +31,30 @@
   {{if eq (len .Events) 0}}
     <p class="tl-empty">No events recorded for this session.</p>
   {{else}}
-    <table class="tl-events-table">
-      <thead>
-        <tr>
-          <th class="tl-num">Seq</th>
-          <th>Timestamp</th>
-          <th>Level</th>
-          <th>Source</th>
-          <th>Message</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Events}}
+    <div class="tl-table-wrap">
+      <table class="tl-events-table">
+        <thead>
           <tr>
-            <td class="tl-num">{{.SeqID}}</td>
-            <td>{{.TSHuman}}</td>
-            <td class="tl-level tl-level-{{.Level}}">{{.Level}}</td>
-            <td class="tl-mono">{{.Source}}</td>
-            <td>{{.Msg}}</td>
+            <th class="tl-num">Seq</th>
+            <th>Timestamp</th>
+            <th>Level</th>
+            <th>Source</th>
+            <th>Message</th>
           </tr>
-        {{end}}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {{range .Events}}
+            <tr>
+              <td class="tl-num">{{.SeqID}}</td>
+              <td>{{.TSHuman}}</td>
+              <td class="tl-level tl-level-{{.Level}}">{{.Level}}</td>
+              <td class="tl-mono">{{.Source}}</td>
+              <td>{{.Msg}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
     {{if .EventLimitHit}}
       <p class="tl-muted">Only the most recent {{.EventLimit}} events shown.
         Older events are still in the store — use the CLI/MCP cursor reads
@@ -64,25 +66,27 @@
   {{if eq (len .Crashes) 0}}
     <p class="tl-empty">No crashes detected for this session.</p>
   {{else}}
-    <table class="tl-crashes-table">
-      <thead>
-        <tr>
-          <th class="tl-num">ID</th>
-          <th>Timestamp</th>
-          <th>Fingerprint</th>
-          <th class="tl-num">Count</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Crashes}}
+    <div class="tl-table-wrap">
+      <table class="tl-crashes-table">
+        <thead>
           <tr>
-            <td class="tl-num">{{.ID}}</td>
-            <td>{{.TSHuman}}</td>
-            <td class="tl-mono">{{.Fingerprint}}</td>
-            <td class="tl-num">{{.Count}}</td>
+            <th class="tl-num">ID</th>
+            <th>Timestamp</th>
+            <th>Fingerprint</th>
+            <th class="tl-num">Count</th>
           </tr>
-        {{end}}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {{range .Crashes}}
+            <tr>
+              <td class="tl-num">{{.ID}}</td>
+              <td>{{.TSHuman}}</td>
+              <td class="tl-mono">{{.Fingerprint}}</td>
+              <td class="tl-num">{{.Count}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   {{end}}
 </section>

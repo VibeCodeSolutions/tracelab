@@ -42,41 +42,45 @@
     <p class="tl-empty">No crashes found{{if .SessionID}} for session
       &laquo;{{.SessionID}}&raquo;{{end}}.</p>
   {{else}}
-    <table class="tl-crashes-table">
-      <thead>
-        <tr>
-          <th>Fingerprint</th>
-          <th>Session</th>
-          <th class="tl-num">Count</th>
-          <th>Last seen</th>
-          <th>Top frames</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Crashes}}
-          <tr class="tl-crash-row"
-              hx-get="/dashboard/tab/crashes/{{.ID}}"
-              hx-target="#dashboard-content"
-              hx-swap="innerHTML"
-              hx-push-url="true"
-              style="cursor: pointer;">
-            <td class="tl-mono">{{.Fingerprint}}</td>
-            <td class="tl-mono">{{.SessionID}}</td>
-            <td class="tl-num">{{.Count}}</td>
-            <td>{{.LastSeenHuman}}</td>
-            <td>
-              {{if .TopFrames}}
-                <ul class="tl-frames-preview">
-                  {{range .TopFrames}}<li class="tl-mono">{{.}}</li>{{end}}
-                </ul>
-              {{else}}
-                <span class="tl-muted">—</span>
-              {{end}}
-            </td>
+    {{/* S5 polish: wrapper enables horizontal scroll inside the table
+         on narrow viewports so the page itself never page-scrolls. */}}
+    <div class="tl-table-wrap">
+      <table class="tl-crashes-table">
+        <thead>
+          <tr>
+            <th>Fingerprint</th>
+            <th>Session</th>
+            <th class="tl-num">Count</th>
+            <th>Last seen</th>
+            <th>Top frames</th>
           </tr>
-        {{end}}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {{range .Crashes}}
+            <tr class="tl-crash-row"
+                hx-get="/dashboard/tab/crashes/{{.ID}}"
+                hx-target="#dashboard-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                style="cursor: pointer;">
+              <td class="tl-mono">{{.Fingerprint}}</td>
+              <td class="tl-mono">{{.SessionID}}</td>
+              <td class="tl-num">{{.Count}}</td>
+              <td>{{.LastSeenHuman}}</td>
+              <td>
+                {{if .TopFrames}}
+                  <ul class="tl-frames-preview">
+                    {{range .TopFrames}}<li class="tl-mono">{{.}}</li>{{end}}
+                  </ul>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   {{end}}
 
   <nav class="tl-pagination" aria-label="Crashes pagination">

@@ -40,33 +40,37 @@
     <p class="tl-empty">No sessions found{{if .Filter}} for filter
       &laquo;{{.Filter}}&raquo;{{end}}.</p>
   {{else}}
-    <table class="tl-sessions-table">
-      <thead>
-        <tr>
-          <th>Session-ID</th>
-          <th>Started</th>
-          <th>Ended</th>
-          <th class="tl-num">Events</th>
-          <th class="tl-num">Crashes</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Sessions}}
-          <tr class="tl-session-row"
-              hx-get="/dashboard/tab/sessions/{{.ID}}"
-              hx-target="#dashboard-content"
-              hx-swap="innerHTML"
-              hx-push-url="true"
-              style="cursor: pointer;">
-            <td class="tl-mono">{{.ID}}</td>
-            <td>{{.StartedAtHuman}}</td>
-            <td>{{if .EndedAtHuman}}{{.EndedAtHuman}}{{else}}<span class="tl-muted">—</span>{{end}}</td>
-            <td class="tl-num">{{.EventCount}}</td>
-            <td class="tl-num">{{.CrashCount}}</td>
+    {{/* S5 polish: wrapper enables horizontal scroll inside the table
+         on narrow viewports so the page itself never page-scrolls. */}}
+    <div class="tl-table-wrap">
+      <table class="tl-sessions-table">
+        <thead>
+          <tr>
+            <th>Session-ID</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th class="tl-num">Events</th>
+            <th class="tl-num">Crashes</th>
           </tr>
-        {{end}}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {{range .Sessions}}
+            <tr class="tl-session-row"
+                hx-get="/dashboard/tab/sessions/{{.ID}}"
+                hx-target="#dashboard-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                style="cursor: pointer;">
+              <td class="tl-mono">{{.ID}}</td>
+              <td>{{.StartedAtHuman}}</td>
+              <td>{{if .EndedAtHuman}}{{.EndedAtHuman}}{{else}}<span class="tl-muted">—</span>{{end}}</td>
+              <td class="tl-num">{{.EventCount}}</td>
+              <td class="tl-num">{{.CrashCount}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   {{end}}
 
   <nav class="tl-pagination" aria-label="Sessions pagination">

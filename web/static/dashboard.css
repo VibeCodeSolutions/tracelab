@@ -1,11 +1,60 @@
 /*
- * dashboard.css — minimal layout/typography for the Tracelab dashboard
- * (Phase 2c S1, ADR-011 Decision 3 — vendored, no external CSS framework).
+ * dashboard.css — minimal layout/typography for the Tracelab dashboard.
  *
- * Goals: legible at desktop and mobile widths, no visual flourish, no JS-
- * dependent styling. S5 polish iterates on top of this; S1 just ships a
- * usable frame so the tab-routing skeleton is visually distinguishable.
+ * Phase 2c S1 shipped the initial frame (ADR-011 Decision 3 — vendored,
+ * no external CSS framework). S5 (this revision) consolidates the
+ * per-tab duplicated selectors, lifts the colour/sizing literals into
+ * CSS custom properties, and widens the responsive posture so the
+ * 375 px mobile viewport reads cleanly without page-level horizontal
+ * scroll (tables scroll inside their own wrapper instead).
+ *
+ * Conventions:
+ *
+ *   - All UI literals live in :root custom properties so a future
+ *     light/dark toggle (out of 2c scope) needs to touch one block, not
+ *     the whole file.
+ *   - The `tl-tab-panel` class is the shared rule scope for every tab's
+ *     content surface; per-tab classes (`tl-sessions`, `tl-crashes`, …)
+ *     only override behaviour that genuinely differs.
+ *   - Empty-state cards use `.tl-empty` (legacy, used by inline <p>
+ *     markers in sessions/crashes templates) and `.tl-empty-state`
+ *     (the richer block used by the agents stub). Both share the card
+ *     styling so the visual feels uniform regardless of which one a
+ *     template reached for.
+ *   - Error cards (`.tl-error-card`) share the empty-state shape with
+ *     a red accent. Reserved for future use; ready-to-style hook for
+ *     htmx error surfaces or daemon-not-configured banners.
  */
+
+:root {
+  /* Surfaces */
+  --tl-bg:           #fafafa;
+  --tl-surface:      #ffffff;
+  --tl-surface-alt:  #f0f0f0;
+  --tl-surface-mute: #f5f5f5;
+  --tl-ink:          #1a1a1a;
+  --tl-ink-mute:     #555555;
+  --tl-ink-fade:     #777777;
+  --tl-ink-ghost:    #999999;
+  --tl-border:       #d0d0d0;
+  --tl-border-soft:  #eaeaea;
+
+  /* Accents */
+  --tl-accent-ok:    #1f7a1f;
+  --tl-accent-warn:  #b07700;
+  --tl-accent-err:   #b00020;
+  --tl-accent-link:  #1a4f9e;
+
+  /* Dark inset (live-tail, stacktrace) */
+  --tl-dark-bg:      #1a1a1a;
+  --tl-dark-fg:      #e0e0e0;
+
+  /* Sizing */
+  --tl-radius:       3px;
+  --tl-radius-lg:    4px;
+  --tl-tap-target:   44px;       /* Apple/Material minimum */
+  --tl-mono:         ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 
 * { box-sizing: border-box; }
 
@@ -14,19 +63,22 @@ html, body {
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                "Helvetica Neue", Arial, sans-serif;
+  /* 16px base; mobile-readable minimum (>= 14px on every nested rule). */
   font-size: 16px;
   line-height: 1.5;
-  background: #fafafa;
-  color: #1a1a1a;
+  background: var(--tl-bg);
+  color: var(--tl-ink);
 }
+
+/* ── Header / Tabs / Footer (shared shell) ─────────────────────────── */
 
 .tl-header {
   display: flex;
   align-items: baseline;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  background: #1a1a1a;
-  color: #fafafa;
+  background: var(--tl-dark-bg);
+  color: var(--tl-bg);
 }
 .tl-header h1 {
   margin: 0;
@@ -36,31 +88,31 @@ html, body {
 .tl-version {
   font-size: 0.85rem;
   opacity: 0.7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--tl-mono);
 }
 
 .tl-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  background: #eaeaea;
-  border-bottom: 1px solid #d0d0d0;
+  background: var(--tl-border-soft);
+  border-bottom: 1px solid var(--tl-border);
   padding: 0 0.5rem;
 }
 .tl-tab {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tl-tap-target);  /* tap-target floor on mobile */
   padding: 0.6rem 1rem;
-  color: #1a1a1a;
+  color: var(--tl-ink);
   text-decoration: none;
   border-bottom: 2px solid transparent;
   font-size: 0.95rem;
 }
-.tl-tab:hover {
-  background: #f0f0f0;
-}
+.tl-tab:hover { background: #f0f0f0; }
 .tl-tab-active {
-  background: #fafafa;
-  border-bottom-color: #1a1a1a;
+  background: var(--tl-bg);
+  border-bottom-color: var(--tl-ink);
   font-weight: 600;
 }
 
@@ -70,31 +122,35 @@ html, body {
   margin: 0 auto;
 }
 
+.tl-footer {
+  border-top: 1px solid var(--tl-border);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;        /* 14px floor */
+  color: var(--tl-ink-mute);
+  text-align: center;
+}
+
+/* ── Tab panels: shared rules ──────────────────────────────────────── */
+
 .tl-tab-panel h2 {
   margin-top: 0;
   font-size: 1.15rem;
 }
+.tl-tab-panel h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
 .tl-placeholder {
-  color: #555;
+  color: var(--tl-ink-mute);
   font-style: italic;
 }
 
-.tl-footer {
-  border-top: 1px solid #d0d0d0;
-  padding: 0.75rem 1rem;
-  font-size: 0.8rem;
-  color: #555;
-  text-align: center;
-}
-
-@media (max-width: 600px) {
-  .tl-header h1 { font-size: 1.1rem; }
-  .tl-tab { padding: 0.5rem 0.75rem; font-size: 0.9rem; }
-  .tl-content { padding: 0.75rem; }
-}
-
-/* Live-Tail tab (Phase 2c S2, ADR-012) ------------------------------ */
-
+/* Forms / controls shared by sessions + crashes filter bars and the
+ * live-tail connect form. Per-tab classes only override flex behaviour
+ * for fields that need a different stretch. */
+.tl-tab-panel form,
+.tl-sessions-controls,
+.tl-crashes-controls,
 .tl-live-controls {
   display: flex;
   flex-wrap: wrap;
@@ -103,44 +159,222 @@ html, body {
   margin: 0.5rem 0 0.75rem;
   font-size: 0.9rem;
 }
-.tl-live-controls input[type="text"] {
-  flex: 1 1 16rem;
-  min-width: 12rem;
-  padding: 0.35rem 0.5rem;
+.tl-tab-panel input[type="text"],
+.tl-tab-panel input[type="search"],
+.tl-tab-panel select,
+.tl-tab-panel button {
+  padding: 0.45rem 0.6rem;
   border: 1px solid #c0c0c0;
-  border-radius: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-radius: var(--tl-radius);
+  font-size: 0.9rem;          /* 14.4 px – mobile-readable */
+  min-height: var(--tl-tap-target);
+  background: var(--tl-bg);
+}
+.tl-tab-panel input[type="search"],
+.tl-tab-panel input[type="text"] {
+  font-family: var(--tl-mono);
+}
+.tl-tab-panel button { cursor: pointer; }
+.tl-tab-panel button:disabled { opacity: 0.5; cursor: default; }
+
+/* Sessions-specific: the filter field stretches to consume the row. */
+.tl-sessions-controls input[type="search"] { flex: 1 1 18rem; }
+/* Live-tail-specific: the session-id field stretches similarly. */
+.tl-live-controls input[type="text"]      { flex: 1 1 16rem; min-width: 12rem; }
+
+/* ── Tables (shared across sessions / events / crashes lists) ──────── */
+
+/* The .tl-table-wrap wrapper keeps a wide table from forcing the whole
+ * page into horizontal scroll on a phone. Templates that wrap their
+ * <table> in <div class="tl-table-wrap"> get the auto-scroll for free;
+ * legacy templates without the wrapper degrade to the document scroll
+ * (acceptable fallback, just less polished). */
+.tl-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tl-tab-panel table,
+.tl-sessions-table,
+.tl-events-table,
+.tl-crashes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;          /* 14.4 px – mobile-readable */
+  background: var(--tl-surface);
+  border: 1px solid var(--tl-border);
+}
+.tl-tab-panel th,
+.tl-tab-panel td {
+  padding: 0.5rem 0.6rem;     /* >= 8 px vertical = 40 px row floor */
+  border-bottom: 1px solid #eee;
+  text-align: left;
+  vertical-align: top;
+}
+.tl-tab-panel th {
+  background: var(--tl-surface-alt);
+  font-weight: 600;
+}
+.tl-tab-panel .tl-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clickable rows: at least one full tap-target tall, mouse pointer
+ * cue, hover background hint. The inline `cursor: pointer` style on
+ * .tl-session-row / .tl-crash-row in the template still wins, but
+ * the row height is enforced here. */
+.tl-session-row,
+.tl-crash-row {
+  min-height: var(--tl-tap-target);
+}
+.tl-session-row:hover,
+.tl-crash-row:hover {
+  background: #f8f8f8;
+}
+
+/* Shared utility classes used across panels and rows. */
+.tl-mono { font-family: var(--tl-mono); }
+.tl-muted { color: var(--tl-ink-ghost); }
+
+/* ── Empty + Error cards ───────────────────────────────────────────── */
+
+/* .tl-empty (legacy inline marker) and .tl-empty-state (richer block)
+ * share the same card. The richer variant adds typography for a title
+ * + body + bullet list. */
+.tl-empty,
+.tl-empty-state {
+  padding: 1rem;
+  text-align: center;
+  color: var(--tl-ink-fade);
+  background: var(--tl-surface-mute);
+  border: 1px dashed #ccc;
+  border-radius: var(--tl-radius-lg);
+}
+.tl-empty-state {
+  text-align: left;
+}
+.tl-empty-state-title {
+  margin: 0 0 0.5rem;
+  color: var(--tl-ink);
+  font-weight: 600;
+  font-size: 1rem;
+}
+.tl-empty-state-body {
+  margin: 0 0 0.5rem;
+  color: var(--tl-ink-mute);
+  font-size: 0.9rem;
+}
+.tl-empty-state-list {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+  color: var(--tl-ink-mute);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.tl-empty-state-list li { margin: 0.2rem 0; }
+.tl-empty-state-footer {
+  margin: 0.75rem 0 0;
   font-size: 0.85rem;
 }
-.tl-live-controls button {
-  padding: 0.35rem 0.75rem;
+.tl-empty-state code {
+  font-family: var(--tl-mono);
+  font-size: 0.85rem;
+  background: var(--tl-surface-alt);
+  padding: 0 0.25rem;
+  border-radius: var(--tl-radius);
+}
+
+/* .tl-error-card mirrors the empty-state shape with a red accent.
+ * Reserved hook for future htmx error surfaces or a daemon-not-
+ * configured banner; no template currently emits it but the styling
+ * sits ready so the first emitter doesn't need a CSS round-trip. */
+.tl-error-card {
+  padding: 1rem;
+  color: var(--tl-accent-err);
+  background: #fff5f5;
+  border: 1px solid #f3c2c2;
+  border-radius: var(--tl-radius-lg);
+}
+.tl-error-card-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+.tl-error-card a { color: var(--tl-accent-err); }
+
+/* ── Pagination ────────────────────────────────────────────────────── */
+
+.tl-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.75rem 0;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+.tl-pagination a {
+  color: var(--tl-ink);
+  text-decoration: none;
+  padding: 0.5rem 0.75rem;
   border: 1px solid #c0c0c0;
-  background: #fafafa;
-  border-radius: 3px;
-  cursor: pointer;
+  border-radius: var(--tl-radius);
+  background: var(--tl-bg);
+  min-height: var(--tl-tap-target);
+  display: inline-flex;
+  align-items: center;
 }
-.tl-live-controls button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.tl-pagination a:hover { background: #eee; }
+.tl-page-indicator { color: var(--tl-ink-mute); }
+
+/* ── Detail headers (sessions + crashes) ───────────────────────────── */
+
+.tl-session-detail-header,
+.tl-crash-detail-header { margin-bottom: 1rem; }
+.tl-back {
+  color: var(--tl-accent-link);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tl-tap-target);
+  padding: 0.25rem 0;
 }
+.tl-back:hover { text-decoration: underline; }
+
+.tl-session-meta,
+.tl-crash-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+.tl-session-meta dt,
+.tl-crash-meta dt { color: var(--tl-ink-mute); font-weight: 600; }
+.tl-session-meta dd,
+.tl-crash-meta dd { margin: 0; }
+
+/* ── Live-Tail tab (Phase 2c S2, ADR-012) ──────────────────────────── */
+
 .tl-live-status {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-  color: #555;
+  font-family: var(--tl-mono);
+  font-size: 0.85rem;
+  color: var(--tl-ink-mute);
   margin-left: auto;
 }
-.tl-live-status.tl-live-ok { color: #1f7a1f; }
-.tl-live-status.tl-live-error { color: #b00020; }
-.tl-live-status.tl-live-paused { color: #b07700; }
+.tl-live-status.tl-live-ok      { color: var(--tl-accent-ok); }
+.tl-live-status.tl-live-error   { color: var(--tl-accent-err); }
+.tl-live-status.tl-live-paused  { color: var(--tl-accent-warn); }
 
 .tl-live-output {
-  background: #1a1a1a;
-  color: #e0e0e0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-  line-height: 1.35;
+  background: var(--tl-dark-bg);
+  color: var(--tl-dark-fg);
+  font-family: var(--tl-mono);
+  font-size: 0.85rem;            /* 13.6 → bumped to 14 below in @media */
+  line-height: 1.4;
   padding: 0.75rem;
-  border-radius: 4px;
+  border-radius: var(--tl-radius-lg);
   max-height: 60vh;
   overflow-y: auto;
   overflow-anchor: none;
@@ -150,129 +384,21 @@ html, body {
 }
 .tl-live-host { display: contents; }
 
-/* Sessions tab (Phase 2c S3) ----------------------------------------- */
-
-.tl-sessions-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin: 0.5rem 0 0.75rem;
-  font-size: 0.9rem;
-}
-.tl-sessions-controls input[type="search"],
-.tl-sessions-controls select {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #c0c0c0;
-  border-radius: 3px;
-  font-size: 0.85rem;
-}
-.tl-sessions-controls input[type="search"] {
-  flex: 1 1 18rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.tl-sessions-table,
-.tl-events-table,
-.tl-crashes-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
-  background: #fff;
-  border: 1px solid #d0d0d0;
-}
-.tl-sessions-table th,
-.tl-sessions-table td,
-.tl-events-table th,
-.tl-events-table td,
-.tl-crashes-table th,
-.tl-crashes-table td {
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid #eee;
-  text-align: left;
-  vertical-align: top;
-}
-.tl-sessions-table th,
-.tl-events-table th,
-.tl-crashes-table th {
-  background: #f0f0f0;
-  font-weight: 600;
-}
-.tl-sessions-table .tl-num,
-.tl-events-table .tl-num,
-.tl-crashes-table .tl-num { text-align: right; font-variant-numeric: tabular-nums; }
-.tl-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.tl-muted { color: #999; }
-.tl-empty {
-  padding: 1rem;
-  text-align: center;
-  color: #777;
-  background: #f5f5f5;
-  border: 1px dashed #ccc;
-  border-radius: 4px;
-}
-
-.tl-session-row:hover { background: #f8f8f8; }
-
-.tl-pagination {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin: 0.75rem 0;
-  justify-content: center;
-  font-size: 0.9rem;
-}
-.tl-pagination a { color: #1a1a1a; text-decoration: none; padding: 0.3rem 0.6rem; border: 1px solid #c0c0c0; border-radius: 3px; background: #fafafa; }
-.tl-pagination a:hover { background: #eee; }
-.tl-page-indicator { color: #555; }
-
-.tl-session-detail-header { margin-bottom: 1rem; }
-.tl-back { color: #1a4f9e; text-decoration: none; }
-.tl-back:hover { text-decoration: underline; }
-
-.tl-session-meta {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-.tl-session-meta dt { color: #555; font-weight: 600; }
-.tl-session-meta dd { margin: 0; }
+/* ── Level chips (events table) ────────────────────────────────────── */
 
 .tl-level { font-variant: small-caps; font-weight: 600; }
-.tl-level-error { color: #b00020; }
-.tl-level-warn  { color: #b07700; }
-.tl-level-info  { color: #1f7a1f; }
+.tl-level-error { color: var(--tl-accent-err); }
+.tl-level-warn  { color: var(--tl-accent-warn); }
+.tl-level-info  { color: var(--tl-accent-ok); }
 
-/* Crashes tab (Phase 2c S4) ------------------------------------------ */
+/* ── Crashes-tab specifics: top-frames preview list ───────────────── */
 
-.tl-crashes-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin: 0.5rem 0 0.75rem;
-  font-size: 0.9rem;
-}
-.tl-crashes-controls select {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #c0c0c0;
-  border-radius: 3px;
-  font-size: 0.85rem;
-}
-
-.tl-crash-row:hover { background: #f8f8f8; }
-
-/* Top-frames preview list inside the crashes table cells: compact,
- * monospace, no bullet markers. Each line truncates with ellipsis so
- * a verbose frame doesn't blow the row height. */
 .tl-frames-preview {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 0.78rem;
-  line-height: 1.3;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 .tl-frames-preview li {
   white-space: nowrap;
@@ -281,26 +407,45 @@ html, body {
   max-width: 32rem;
 }
 
-.tl-crash-detail-header { margin-bottom: 1rem; }
-.tl-crash-meta {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-.tl-crash-meta dt { color: #555; font-weight: 600; }
-.tl-crash-meta dd { margin: 0; }
+/* ── Stacktrace (crash detail) ─────────────────────────────────────── */
 
 .tl-stacktrace {
-  background: #1a1a1a;
-  color: #e0e0e0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
+  background: var(--tl-dark-bg);
+  color: var(--tl-dark-fg);
+  font-family: var(--tl-mono);
+  font-size: 0.85rem;
   line-height: 1.4;
   padding: 0.75rem;
-  border-radius: 4px;
+  border-radius: var(--tl-radius-lg);
   overflow-x: auto;
   white-space: pre;
   margin: 0;
+}
+
+/* ── Responsive: phone-sized viewport (≤ 600 px) ───────────────────── */
+
+@media (max-width: 600px) {
+  .tl-header h1   { font-size: 1.1rem; }
+  .tl-tab         { padding: 0.5rem 0.75rem; font-size: 0.9rem; }
+  .tl-content     { padding: 0.75rem; }
+
+  /* Tables shrink to a still-readable 14 px on phones. The wrapper
+   * (.tl-table-wrap) takes care of overflow so the page itself never
+   * scrolls sideways. */
+  .tl-tab-panel table { font-size: 0.875rem; }      /* 14 px exact */
+  .tl-tab-panel th,
+  .tl-tab-panel td    { padding: 0.45rem 0.5rem; }
+
+  /* Frames-preview can wrap on a phone — the desktop ellipsis is
+   * unfriendly to a touch-scroll user. */
+  .tl-frames-preview li {
+    white-space: normal;
+    max-width: none;
+  }
+
+  /* Filter bars stack instead of cramming side-by-side. */
+  .tl-sessions-controls input[type="search"],
+  .tl-live-controls input[type="text"] {
+    flex: 1 1 100%;
+  }
 }
