@@ -133,14 +133,11 @@ func TestDashboardStream_EventEndToEnd(t *testing.T) {
 	defer resp.Body.Close()
 	reader := bufio.NewReader(resp.Body)
 
-	// Wait for Subscribe to register.
-	deadline := time.Now().Add(1 * time.Second)
-	for hub.SubscriberCount() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if hub.SubscriberCount() == 0 {
-		t.Fatal("stream handler did not subscribe")
-	}
+	// Wait for Subscribe to register. Uses the same poll-deadline helper
+	// as the /tail tests (see tail_test.go::waitForSubs) — keeps every
+	// subscribe-wait point in this package on one Pattern instead of
+	// hand-rolling a fresh sleep-loop each time.
+	waitForSubs(t, hub, 1, time.Second)
 
 	hub.Publish(ws.Event{SessionID: "sess-e2e", Msg: "wired-through"})
 

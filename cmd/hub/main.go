@@ -106,8 +106,6 @@ func run() error {
 	addr := cfg.Server.Bind + ":" + strconv.Itoa(cfg.Server.Port)
 	handler := httplayer.New(st, httplayer.Config{
 		AuthToken:       cfg.Auth.Token,
-		ReadTimeout:     cfg.Server.ReadTimeout,
-		WriteTimeout:    cfg.Server.WriteTimeout,
 		Logger:          logger,
 		Hub:             hub,
 		ADBManager:      adbMgr,

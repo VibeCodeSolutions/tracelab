@@ -20,16 +20,19 @@ import (
 
 // Config controls runtime parameters of the HTTP layer that are not
 // already covered by the chi defaults.
+//
+// NOTE: server-wide ReadTimeout / WriteTimeout knobs are NOT mirrored
+// here. The caller (cmd/hub/main.go) reads them directly from
+// internal/config.Config.Server and threads them into the underlying
+// *http.Server. Forwarding them through this struct as well — as a
+// previous iteration did — was dead code: this package only owns the
+// chi handler, not the http.Server itself. See internal/config for the
+// canonical Read/WriteTimeout TOML keys.
 type Config struct {
 	// AuthToken is the shared secret expected in `Authorization: Bearer <token>`.
 	// An empty token disables auth — this is rejected by New() to avoid
 	// accidentally opening up the API.
 	AuthToken string
-
-	// ReadTimeout / WriteTimeout are forwarded to the *http.Server by the caller;
-	// kept here so all knobs travel together.
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
 
 	// Logger is the slog handler used by the request logger middleware. If nil,
 	// slog.Default() is used.
