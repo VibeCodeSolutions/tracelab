@@ -1054,21 +1054,26 @@ tracelab/
   touching `web/static/htmx.min.js` plus a verification smoke. No
   silent upgrades. Version comment in the file documents the source URL
   and the SHA256.
-- **Auth posture deferred.** ADR-011 does not decide how `/dashboard`
-  is authenticated; Decision 2 just registers it as a sub-router. The
-  Phase-1 bearer-header model does not work for browsers (no API to
-  attach `Authorization` to a `<script src=…>` load), so an auth
-  strategy (bearer-via-cookie, dashboard-session-token, or
-  local-loopback-only) needs its own ADR — proposed as an S1 follow-up
-  / S2 prerequisite, not bundled into ADR-011.
+- **Auth posture: permanently Loopback-only (Admin-Confirm 2026-05-16).**
+  ADR-011 originally deferred the dashboard auth model to a follow-up
+  ADR. Admin confirmed via AskUserQuestion-block on 2026-05-16
+  (#026 plan-briefing) that the dashboard sub-router stays
+  **permanently Loopback-only** — no cookie-wrap, no reverse-proxy,
+  no short-lived session-token layer. Operational assumption: the
+  hub binds to `127.0.0.1:<port>` (single-user dev host), and the
+  dashboard inherits that binding. Browsers on the same machine
+  reach `/dashboard` without an `Authorization` header; remote
+  clients are physically unreachable. Should a future deployment
+  scenario need remote dashboard access (multi-user, reverse-proxy,
+  TLS terminator), that is a **separate ADR** (e.g. an ADR-XYZ
+  Cookie-Wrap), explicitly *not* a follow-up to ADR-011 — the
+  Loopback-only decision is a deliberate posture, not a TODO.
 
-#### ADR-012: Dashboard live-tail mechanism — SSE vs. WS-reuse (PROPOSED, awaiting Admin-Confirm via Chakotay)
+#### ADR-012: Dashboard live-tail mechanism — SSE on `/dashboard/stream` (Accepted 2026-05-16)
 
-> **Status:** Proposed. Decision block intentionally left blank. The
-> Phase-2c plan (Admin-confirmed 2026-05-16) flags the live-tail
-> mechanism as an explicit Auto-Stop trigger — Belanna routes Ballard's
-> trade-off analysis to Chakotay, who collects Admin's confirmation
-> before S2 (live-tail implementation) starts.
+> **Status:** Accepted (Admin-Confirm 2026-05-16 via AskUserQuestion-block,
+> Chakotay; Lead-Empfehlung Ballard P2c-S1 übernommen). S2 implements
+> the decision in `internal/dashboard/stream.go` + `web/templates/tab_live_tail.gohtml`.
 
 S1 (this sub-sprint) lays the dashboard foundation but does **not**
 implement live-tail. S2 picks one of the two options below and wires it
@@ -1149,8 +1154,57 @@ takes the long-term-maintenance trade.
 
 ##### Decision
 
-*(intentionally blank — awaits Admin-Confirm via Chakotay; Belanna will
-route Ballard's recommendation upstream)*
+**Option A — Server-Sent Events on a new `/dashboard/stream` endpoint.**
+
+Admin-confirmed 2026-05-16 via AskUserQuestion-block (Chakotay),
+Lead-Empfehlung Ballard P2c-S1 übernommen ohne Korrektur.
+
+##### Consequences
+
+- **New endpoint `GET /dashboard/stream?session=<id>`** registered as a
+  sub-router entry under `/dashboard*` in `internal/http/server.go` —
+  outside the bearer-group (consistent with the rest of `/dashboard*`,
+  see ADR-011 *Consequences*: Loopback-only auth posture). Handler
+  lives in `internal/dashboard/stream.go` (new file, separate from
+  `handler.go` to keep the streaming lifecycle code isolated from the
+  request/response layout handlers).
+- **Subscriber-Bridge to `ws.Hub`** uses the existing
+  `Hub.Subscribe(sessionFilter) (<-chan Event, func())` API
+  **as-is** — no additive widening required. The S1-era audit
+  ("`ws.Hub.Subscribe` SSE-bridge tauglich?") settled in S2 as: yes,
+  trivially. The Subscribe API returns a typed event channel plus
+  an idempotent cancel; the SSE handler ranges over the channel,
+  encodes `data: <json>\n\n`, flushes after every event, and calls
+  the cancel func on `r.Context().Done()` for clean teardown.
+- **Slow-subscriber drop is inherited** from `ws.Hub.Publish` (the
+  non-blocking send loop with `default: drop`). The SSE handler does
+  not need to re-implement drop semantics in the bridge layer — if the
+  Hub drops an event for this subscriber's channel, the SSE writer
+  never sees it. The browser thus experiences "occasionally missing
+  events under sustained backpressure", exactly the same observability
+  contract as `/tail` WS consumers. This matches the Plan-Briefing's
+  default-decision ("drop-events analog ws.Hub") without an
+  additional Auto-Stop.
+- **Heartbeat ticker = 15s**, writing the SSE comment line
+  `: heartbeat\n\n` (a comment frame, ignored by the EventSource
+  consumer but keeps proxies and `net.Conn` read deadlines from
+  closing an idle stream). 15s is well under the conventional 30s
+  proxy idle-timeout floor and the browser's own 90s
+  `connectionTimeout` for `EventSource`; configurable via a
+  package-level `HeartbeatInterval` var (tests shrink it).
+- **`/tail` WS endpoint is unchanged.** CLI consumers (`tracelab tail`)
+  and the MCP server keep talking to `/tail` byte-identically. SSE on
+  `/dashboard/stream` is purely additive surface — the existing
+  Hub-subscriber count grows by one per open dashboard tab, same
+  cost envelope as a CLI tail consumer.
+- **No new dependency.** SSE is plain HTTP — `http.Flusher`
+  type-asserted from the `http.ResponseWriter`, `text/event-stream`
+  content-type, and `data:`-prefixed frames. The stdlib `net/http`
+  layer handles everything. The htmx SSE extension (`htmx-ext-sse`)
+  ships as a separate vendored `web/static/htmx-ext-sse.js` file
+  (htmx v2.0.4 does **not** include the SSE extension in the core
+  bundle — confirmed via release notes and source inspection), SHA-pinned
+  in `web/static/htmx-ext-sse.version.txt` like the htmx core itself.
 
 ##### Considered & rejected (regardless of A/B)
 

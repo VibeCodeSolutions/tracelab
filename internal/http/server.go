@@ -59,16 +59,18 @@ type Config struct {
 	// — production hubs always pass a non-nil handler (cmd/hub/main.go),
 	// HTTP-layer unit tests that don't exercise the dashboard pass nil.
 	//
-	// AUTH POSTURE (S1): the dashboard sub-router is registered WITHOUT
-	// bearer middleware. Browsers cannot attach an Authorization header
-	// to <script src=…> or <link href=…> loads, and the README's
-	// explicit "no token in query string" rule rules out the trivial
-	// query-token shortcut. The proper auth wrap (bearer-via-cookie or
-	// short-lived dashboard session token) is deferred to a follow-up
-	// ADR — see ADR-012-followup in docs/ARCH.md. The Phase-1 default
-	// bind is 127.0.0.1:8765 (loopback only), which is the operational
-	// assumption that keeps S1 acceptable: a single-user dev host with
-	// no remote dashboard access until the auth wrap lands.
+	// AUTH POSTURE: the dashboard sub-router is registered WITHOUT
+	// bearer middleware — **permanently Loopback-only by Admin-Confirm
+	// 2026-05-16** (ADR-011 *Consequences*, post-#026 update). Browsers
+	// cannot attach an Authorization header to <script src=…> or page
+	// loads, and the README's explicit "no token in query string" rule
+	// rules out the trivial query-token shortcut. The decision is not
+	// a TODO: the operational assumption is the Phase-1 default bind
+	// 127.0.0.1:<port> (single-user dev host); the dashboard inherits
+	// that binding. No cookie-wrap, no reverse-proxy, no short-lived
+	// session-token layer is planned. Should a future deployment need
+	// remote dashboard access, that is a separate ADR (e.g. ADR-XYZ
+	// Cookie-Wrap), explicitly *not* a follow-up to ADR-011.
 	Dashboard *dashboard.Handler
 }
 

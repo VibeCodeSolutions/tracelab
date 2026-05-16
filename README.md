@@ -63,15 +63,17 @@ the token with `openssl rand -hex 32`.
 | GET    | `/dashboard`     | no¹  | Web dashboard (Phase 2c S1 skeleton). Optional `?tab=<slug>` (`live-tail`/`sessions`/`crashes`/`agents`). |
 | GET    | `/dashboard/tab/{slug}` | no¹ | Tab body for htmx partial-swap. |
 | GET    | `/dashboard/static/*`   | no¹ | Embedded JS/CSS (htmx, dashboard.css). |
+| GET    | `/dashboard/stream`     | no¹ | SSE live-tail stream: `?session=<id>` required. `text/event-stream` with `data: <json>\n\n` frames (Phase 2c S2, ADR-012). |
 
-¹ Phase 2c S1 leaves the dashboard sub-router *unauthenticated*: browsers
-cannot attach an `Authorization:` header to `<script src=…>` / page loads,
-and a query-string token contradicts the API rule below. A cookie-based
-auth wrap (or a short-lived dashboard session token) is the subject of an
-upcoming ADR — see `docs/ARCH.md` ADR-011 *Consequences* and the
-ADR-012 follow-up bookmark. Until then the operational assumption is the
-Phase-1 default bind `127.0.0.1:8765` (loopback only, single-user dev
-host).
+¹ The dashboard sub-router is **permanently Loopback-only**
+(Admin-Confirm 2026-05-16, ADR-011 *Consequences*). Browsers cannot
+attach an `Authorization:` header to `<script src=…>` / page loads,
+and a query-string token contradicts the API rule below. Operational
+assumption: the hub binds to `127.0.0.1:<port>` (single-user dev host),
+and the dashboard inherits that binding — no cookie-wrap, no
+reverse-proxy, no short-lived session-token layer is planned. Should
+a future deployment need remote dashboard access, that is a separate
+ADR, explicitly not a follow-up to ADR-011.
 
 The token must be sent as an `Authorization: Bearer <token>` **header** —
 the hub does not accept the token as a query string parameter (also not on
