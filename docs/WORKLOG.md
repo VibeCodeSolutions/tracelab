@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-s2-eroeffnet (S1 freigegeben fc38460; S2 Live-Tail mit SSE + htmx-Stream-Append + Filter/Auto-Scroll/Pause; ADR-012=Option A + Auth=Loopback-permanent Admin-confirmed 2026-05-16)
+status: phase-2c-s3-eroeffnet (S1+S2 freigegeben fc38460+cf850f8; S3 Session-Browser Auto-Chain nach #026 Freigabe — Tabelle + Filter/Sort/Pagination + Detail-View aus /sessions + /events)
 last-updated: 2026-05-16
-qs-letzter-lauf: qs-20260516-001
+qs-letzter-lauf: qs-20260516-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#026 P2c-S2 Live-Tail — SSE-Endpoint + htmx-Stream-Append + Filter/Auto-Scroll/Pause"
+aktiver-auftrag: "#027 P2c-S3 Session-Browser — Tabelle + Sort/Filter/Pagination + Detail-View"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -23,6 +23,40 @@ aktiver-auftrag: "#026 P2c-S2 Live-Tail — SSE-Endpoint + htmx-Stream-Append + 
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #027 — Tracelab P2c-S3 — Session-Browser (Tabelle + Sort/Filter/Pagination + Detail-View)
+
+- **Timestamp:** 2026-05-16T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (Plan-Briefing 2c „y" 2026-05-16, Default-Modus aktiv inkl. Auto-Continuation) → Chakotay (#026 Findings-Gate freigabe via `cf850f8`, Auto-Chain ohne neue Admin-Approval — Plan-Briefing sieht keine S3-Auto-Stops vor) → belanna
+- **Auftrag:** S3 von Phase 2c — **Session-Browser-Tab end-to-end**. Tabelle aller Sessions mit Sort/Filter/Pagination, Klick → Detail-View mit allen Events der Session. Reuse bestehender Endpoints: `/sessions` (Liste) + `/events?session=…` (Detail). Falls Detail-View einen neuen Server-Endpoint braucht (z.B. `/sessions/{id}` mit aggregierten Counts), additiv in `internal/http` ergänzen + Hub-Schema-Stable-Pattern wie 2a/2b.
+  - **Umbrella-Ref:** Phase 2c (5 Sub-Sprints, S1+S2 ✅)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2c-dashboard.md` (Sub-Sprint S3)
+  - **ADR-Stand:** ADR-011 Accepted (Render-Stack + Auth permanent-Loopback), ADR-012 Accepted (SSE Live-Tail). Kein neuer ADR erwartet (Session-Browser ist pure Server-Render + htmx-Boost ohne neue Mechanik).
+  - **Branch:** `feat/phase-2-dashboard` @ `cf850f8` (aktiv, S1+S2 darauf)
+- **DoD S3:**
+  - **Session-Browser-Tab** in `web/templates/tab_sessions.gohtml` voll implementiert: Tabelle mit Spalten (Session-ID/Start/End/Event-Count/Crash-Count), Klick auf Row öffnet Detail-View (htmx-Swap auf Container).
+  - **Sort:** by start_at desc (default), by session_id, by event-count. htmx-Get auf `/dashboard/tab/sessions?sort=…` mit hx-swap=outerHTML auf den Tab-Inhalt.
+  - **Filter:** Free-Text-Search über session_id-Substring (htmx-Trigger=keyup-delayed-300ms), Datums-Filter (start_at zwischen X und Y).
+  - **Pagination:** Limit/Offset über htmx-Boost mit page-Param. Default-Limit 50.
+  - **Detail-View:** Tabelle aller Events der Session (Spalten: timestamp/level/source/msg), htmx-Boost mit Back-Button.
+  - **Bestehende Endpoints reuse:** `/sessions` für Liste, `/events?session=…` für Detail. Falls aggregierte Counts gewünscht (Event-Count + Crash-Count pro Session in der Liste), eventuell additiv ein `/sessions?with_counts=1`-Query-Param oder ein neuer `/sessions/{id}/stats`-Endpoint — Lead-Empfehlung in Pre-Inspection notieren, autonome Entscheidung wenn additiv-trivial.
+  - **Defensive Patterns:** Unknown-Session-ID → 404 in Detail-View, leere Result-Sets → „No sessions found"-Empty-State im Tab.
+  - **Tests:** `internal/dashboard/sessions_test.go` (neu, mindestens 5 Tests: Tab-Render-Empty, Tab-Render-with-Sessions-Mock, Sort-Param-Forwarding, Filter-Substring-Match, Detail-View-Render). Bestehende Tests grün.
+  - **`go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün, `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` clean.
+  - **E2E-Smoke:** Daemon mit ein paar Test-Sessions, Browser `/dashboard` → Sessions-Tab → Liste sichtbar, Sort/Filter/Pagination funktionieren, Klick auf Session öffnet Detail-View mit Events.
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse `feature`, neuer Session-Browser-Tab mit htmx-Templating + Tests).
+  - Falls aggregierte Counts in `/sessions` nötig: additive Server-Erweiterung, im Bericht begründen, Cross-Check-Scope-Touch dokumentieren.
+  - **Cross-Check-Scope (11. Anwendung):** bestehende Pakete `cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,ingest,ws}` müssen 0 Lines bleiben — `internal/store` ggf. additiv (neue Query-Methode falls Aggregat-Counts), `internal/http/server.go` ggf. Route-Add wenn neuer Endpoint, `internal/dashboard/` + `web/templates/tab_sessions.gohtml` + Tests erwartet.
+- **Auto-Stop S3:** keine eingeplant. Falls Schema-Change am Hub für aggregierte Counts nicht trivial-additiv: Stopp + Admin-Confirm via chakotay.
+- **Nach S3-QS-grün:** Auto-Chain zu S4 (Crash-Inspector) — keine weiteren Auto-Stops bis S5 (Sammel-Gate).
+- **Status:** offen (eröffnet)
+- **Verlauf:**
+  - 2026-05-16T (Eröffnung) — chakotay: Auto-Chain nach #026 Freigabe (`cf850f8`). Default-Modus aktiv, keine S3-Auto-Stops im Plan-Briefing 2c. S3 routet an belanna mit Session-Browser-Tab + Sort/Filter/Pagination + Detail-View. Bestehende Endpoints werden reused (`/sessions` + `/events`), neue aggregierte Counts nur falls additiv-trivial. ADR-Bedarf nicht erwartet — pure Render-Layer-Sprint.
 
 ---
 
