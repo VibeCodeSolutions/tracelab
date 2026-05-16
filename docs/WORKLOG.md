@@ -1,16 +1,15 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-closure-ready — Sammel-Gate freigegeben (qs-20260516-005), VC-029-WAR (CSS-Schrift-Floor-Drift) per Admin-Entscheidung 2026-05-17 als Design-Tail-Backlog reklassifiziert (Design kommt in eigener Phase). Sync-Commit + FF-Merge → main approved.
+status: phase-2-tail-sprint — Phase 2c gemerged (`fca19d0`), Tail-Sprint #030 eröffnet (5 thematische Pakete M1-M10 + VC-029-WAR), Phase 2d (Agents-Stack mit ARCH-Vorab + Multi-Ingest SDK-Hooks/Transcript-Tail/MCP-Push) folgt nach Tail-Sprint-Merge.
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260516-005
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#029 — P2c-S5 abgeschlossen, Phase-2c-Closure läuft"
-design-tail-backlog:
-  - VC-029-WAR (Minor): CSS-Schrift-Floor-Drift in `.tl-live-output` (Line 374) + `.tl-stacktrace` (Line 416) — 13.6px statt versprochener 14px im @media (max-width: 600px)-Block. 2-Zeilen-CSS-Patch. Reklassifiziert 2026-05-17 (Admin: „CSS ist Design-Thema, kommt später").
+phase-2c-merge-commit: fca19d0
+aktiver-auftrag: "#030 — Phase-2-Tail (5 Pakete M1-M10 + VC-029-WAR + Sammel-Gate)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +24,41 @@ design-tail-backlog:
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #030 — Tracelab Phase-2-Tail — 5 thematische Pakete (M1-M10 + VC-029-WAR) + Sammel-Gate vor Phase 2d
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („agents stack" als nächste Phase, dann „erst Tail-Sprint" als Reihenfolge-Entscheidung, „y" auf Tail-Sprint-Skelett) → Chakotay (Phase-2c gemerged `fca19d0`, Tail-Sprint geplant + an belanna routet) → belanna
+- **Auftrag:** Phase-2-Tail-Sprint — 11 Minor-Items aus konsolidiertem Backlog (M1-M10 aus Phase-1-Tail-Konsolidierung + VC-029-WAR aus Phase-2c-Sammel-Gate) in 5 thematischen Paketen aufräumen, Sammel-Gate-QS am Ende vor FF-Merge nach `main`. Vorbereitet damit Phase 2d (Agents-Stack) auf sauberer Basis startet.
+- **Branch:** `chore/phase-2-tail` von `main`@`fca19d0`
+- **Pakete (atomare Commits, eigene Diffs pro Paket):**
+  - **P1 Docs:** M1 (README Endpoints-Tabelle erweitern — Phase-2-Endpoints/dashboard mit aufnehmen)
+  - **P2 http:** M2 (Test-Sleep), M5 (Test-Theater), Cleanup `httplayer.Config.{Read,Write}Timeout` (unbenutzt)
+  - **P3 crash:** M3 (Magic numbers), M6 (Coverage-Lücke Default-Rust-Runtime)
+  - **P4 store+adb:** M4 (UNIQUE-Index Defense-in-Depth), M7 (no-permissions-State), M8 (Windows-Cancel-Doc), M9 (SetBinary aus Public-API), M10 (goleak in TearDown)
+  - **P5 design:** VC-029-WAR (CSS-Schrift-Floor 14px in `.tl-live-output` Line 374 + `.tl-stacktrace` Line 416 im @media (max-width: 600px)-Block — 2-Zeilen-CSS-Patch)
+- **DoD:**
+  - Commit pro Paket (5 atomare Diffs)
+  - `go vet ./...` clean, `go test -race -count=1 ./...` grün repo-weit, `go mod tidy` Diff=0
+  - `make hub mcp mcp-windows hub-windows` 4 CGO-freie Binaries (ELF + PE32+)
+  - Sammel-Gate-QS Tuvok über alle 5 Pakete (release-qs) — Regression-Check, Wire-Stability, kein Major-Finding
+  - Branch `chore/phase-2-tail` push-ready für FF-Merge nach `main`
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🟡 standard, 5 Pakete linear)
+  - Sammel-Gate-Spawn an Tuvok (Klasse release-qs)
+  - **Cross-Check-Scope (14. Anwendung):** Pakete außerhalb der 5 Paket-Scopes bleiben 0 Bytes Diff
+- **Auto-Stop:**
+  - Bei Architektur-Entscheidung in einem Paket (z.B. UNIQUE-Index als separate Migration-File vs. inline `ALTER TABLE`?) → Stop + Admin-Confirm
+  - Bei Major-Finding im Sammel-Gate → Stop + Findings-Gate (kein blindes Auto-Chain zur Merge-Frage)
+- **Nach Sammel-Gate-grün:** Bericht an Admin mit FF-Merge-Approval-Frage. **Kein Auto-FF-Merge** (Default-Modus 5a).
+- **Phase 2d wartet** — startet erst nach Tail-Sprint-Merge mit ARCH-Vorab-Sprint S0 (Ingest-Pipeline-Doku + Schema agent_spawns/agent_tokens/agent_verdicts + Endpoints) und Multi-Ingest-Architektur (SDK-Hooks PostToolUse/Stop + Transcript-Tail .jsonl + MCP-Push). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` wird nach Tail-Sprint-Merge angelegt.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Tail-Sprint-Skelett (5 Pakete + Sammel-Gate, Defaults aus Phase-1-Tail-Pattern). Routet an belanna mit Mandat. Phase 2d steht in Auftragsbeschreibung als Folge-Auftrag (post-Merge).
 
 ---
 
