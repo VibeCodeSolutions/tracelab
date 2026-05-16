@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-s3-qs-gruen (S1+S2 freigegeben fc38460+cf850f8; S3 QS grün via qs-20260516-003 — 0 Findings über alle 7 DoD-Punkte, Cross-Check-Scope 11. erfolgreiche Anwendung; wartet auf Chakotay-Findings-Gate)
+status: phase-2c-3-von-5-durch (S1+S2+S3 alle QS-grün fc38460/cf850f8/220f445; S4 Crash-Inspector + S5 Polish+Sammel-Gate offen; Session pausiert 2026-05-16 nach 3 Sub-Sprints — S4 wartet auf Session-Resume)
 last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260516-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#027 P2c-S3 Session-Browser — Tabelle + Sort/Filter/Pagination + Detail-View"
+aktiver-auftrag: "—"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
