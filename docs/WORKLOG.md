@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-eroeffnet (S1 ARCH-Vorab + Skeleton + /dashboard-Route + Layout läuft; Stack htmx + html/template + SSE in hub-Binary via go:embed; Plan-Briefing 2c Admin-approved 2026-05-16)
+status: phase-2c-s2-eroeffnet (S1 freigegeben fc38460; S2 Live-Tail mit SSE + htmx-Stream-Append + Filter/Auto-Scroll/Pause; ADR-012=Option A + Auth=Loopback-permanent Admin-confirmed 2026-05-16)
 last-updated: 2026-05-16
-qs-letzter-lauf: qs-20260515-005
+qs-letzter-lauf: qs-20260516-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#025 P2c-S1 ARCH-Vorab (ADR-011/012) + Skeleton + /dashboard-Route + Tab-Layout"
+aktiver-auftrag: "#026 P2c-S2 Live-Tail — SSE-Endpoint + htmx-Stream-Append + Filter/Auto-Scroll/Pause"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -23,6 +23,40 @@ aktiver-auftrag: "#025 P2c-S1 ARCH-Vorab (ADR-011/012) + Skeleton + /dashboard-R
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #026 — Tracelab P2c-S2 — Live-Tail (SSE + htmx-Stream-Append + Filter/Auto-Scroll/Pause)
+
+- **Timestamp:** 2026-05-16T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (AskUserQuestion-Block 2026-05-16: ADR-012 = Option A SSE ✅ + Auth = Loopback-Default permanent ✅) → Chakotay (#025-Findings-Gate freigabe via `fc38460`, Auto-Continuation phase-by-phase, beide S2-Auto-Stops aus Plan-Briefing damit aufgelöst) → belanna
+- **Auftrag:** S2 von Phase 2c — **Live-Tail-Tab end-to-end**. SSE auf neuem `/dashboard/stream?session=…`-Endpoint mit Subscriber-Bridge zum WS-Hub (oder direkter Hub-Subscriber-Reuse), Browser-seitig htmx `hx-ext="sse"` mit Stream-Append in den Live-Tail-Tab, Session-Filter-Dropdown + Auto-Scroll + Pause/Resume.
+  - **Umbrella-Ref:** Phase 2c (5 Sub-Sprints S1–S5, S1 ✅)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2c-dashboard.md` (Sub-Sprint S2)
+  - **ADR-Ref bestehend:** ADR-011 (Render-Stack + Embedding, Accepted) — `/dashboard*` als Sub-Router; ADR-012 (Live-Tail-Mechanik, Proposed) — Decision-Block leer, Lead-Empfehlung Option A SSE.
+  - **Branch:** `feat/phase-2-dashboard` (bereits aktiv, S1 darauf gemerged)
+- **DoD S2:**
+  - **ADR-012 Decision-Block ausfüllen VOR Code-Touch** — Option A bestätigt (SSE auf `/dashboard/stream`), Status `Proposed` → `Accepted`, Datum + „Admin-Confirm 2026-05-16 via AskUserQuestion-Block (Chakotay)" als Ref.
+  - **ADR-011 Consequences-Note upgraden** — Auth-Posture von „awaits decision" auf „permanently Loopback-only" (Admin-Confirm 2026-05-16). 3-fach-Doku (Config-Field-Doc + README-Footnote¹ + ARCH-Consequences) entsprechend angleichen.
+  - **SSE-Endpoint** `GET /dashboard/stream?session=<id>` als neuer Sub-Sub-Router-Endpoint unter `/dashboard*`. Subscriber-Bridge zum WS-Hub (`ws.Hub.Subscribe` analog `/tail`-WS-Pfad) → SSE-Encoding (`Content-Type: text/event-stream`, `data: <json>\n\n`-Format, Heartbeat-Comments alle ~15s). Drop-on-full-Slow-Subscriber-Pattern aus ws.Hub übernehmen.
+  - **`internal/dashboard/handler.go`** erweitern um `StreamHandler` (oder neues File `stream.go`). Defensive Patterns: Session-ID-Validation, Hub-nil-Check (analog Layout-Handler-Posture), Heartbeat-Ticker, Context-Cancel-Cleanup.
+  - **Live-Tail-Tab-Template** `web/templates/tab_live_tail.gohtml` upgraden: htmx `hx-ext="sse"` + `hx-sse="connect:/dashboard/stream?session=..."` + `hx-swap="beforeend"` auf ein Ziel-Element. Session-Filter-Dropdown (`<select>` mit Sessions aus `/sessions`-Endpoint, htmx-Hot-Swap des Stream-Targets bei Filter-Wechsel). Auto-Scroll als kleine CSS-/JS-Logik (overflow-anchor oder scrollIntoView in der Event-Append-Hook). Pause/Resume-Toggle (Button, der das `<div>` aus dem SSE-Listening rausnimmt via `hx-swap="none"` oder Connection-Close).
+  - **Tests:** `internal/dashboard/stream_test.go` (neu) — SSE-Format-Konformität (Content-Type, data-Lines, Heartbeat), Slow-Subscriber-Drop-Behavior, Context-Cancel-Cleanup, Session-Filter-Forwarding. Bestehende Tests grün, neue Tests >= 6 für Stream-Pfad.
+  - **`go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün, `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` clean (CGO-frei bestätigt).
+  - **E2E-Smoke:** Daemon mit aktiver Session, im Browser `/dashboard` → Live-Tail-Tab → Events strömen real-time rein, Session-Filter switcht Stream-Target, Auto-Scroll funktioniert, Pause hält Stream an, Resume nimmt wieder auf.
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse `feature`, SSE-Endpoint + Subscriber-Bridge + Browser-Wireup = substantieller Stream-Layer).
+  - **ADR-Updates VOR Code-Touch** (ADR-012-Decision-Block + ADR-011-Consequences-Note).
+  - **Cross-Check-Scope (10. Anwendung):** bestehende Pakete `cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,http,ingest,store}` müssen 0 Lines bleiben — AUSSER `internal/http/server.go` (`/dashboard/stream`-Route-Add) und ggf. `internal/ws/hub.go` falls Subscribe-API noch nicht stream-bridge-fähig (in dem Fall: additive Erweiterung, dokumentieren). Falls weitere Pakete touchiert werden müssen, im Bericht explizit begründen.
+- **Auto-Stop S2:**
+  - **ws.Hub.Subscribe-API-Erweiterung** falls nötig — wenn die bestehende Subscribe-Signatur nicht ohne weiteres SSE-Bridge-tauglich ist (z.B. Channel-Pattern incompatible), kurz an chakotay mit Lead-Empfehlung. Sonst (additive Erweiterung trivial): autonom durchziehen, im ADR-012-Body als Implementation-Detail notieren.
+  - **Slow-Subscriber-Strategy bei Browser** — wenn Browser-SSE-Buffer voll, Behavior abklären (drop-events vs. close-connection vs. backpressure-signal). Default = drop-events analog ws.Hub. Bei abweichender Strategy: kurz an chakotay.
+- **Nach S2-QS-grün:** Auto-Chain zu S3 (Session-Browser) — keine weiteren Auto-Stops im Plan-Briefing für S3-S4. S5 hat Sammel-Gate-QS als natürlichen Stop.
+- **Status:** offen (eröffnet)
+- **Verlauf:**
+  - 2026-05-16T (Eröffnung) — chakotay: Beide S2-Auto-Stops aus Plan-Briefing per AskUserQuestion-Block aufgelöst: ADR-012 Option A (SSE) + Auth Loopback-Default-permanent. S2 routet an belanna mit ADR-Updates-Mandat vor Code-Touch + SSE-Endpoint + Live-Tail-Browser-Wireup. Default-Modus weiter aktiv (Lead-Autonomie für trivial-Folge-Schritte, Auto-Continuation zu S3 nach QS-grün ohne neue Approval-Frage).
 
 ---
 
