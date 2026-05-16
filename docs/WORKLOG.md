@@ -1,14 +1,16 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-5-von-5-durch — Sammel-Gate QS-grün mit 1 Minor (VC-029-WAR CSS-Schrift-Floor-Drift, im Sync-Commit mit-fixbar), wartet auf Chakotay-Findings-Gate + Admin-FF-Merge-Confirm
-last-updated: 2026-05-16
+status: phase-2c-closure-ready — Sammel-Gate freigegeben (qs-20260516-005), VC-029-WAR (CSS-Schrift-Floor-Drift) per Admin-Entscheidung 2026-05-17 als Design-Tail-Backlog reklassifiziert (Design kommt in eigener Phase). Sync-Commit + FF-Merge → main approved.
+last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260516-005
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#029 — P2c-S5 Polish + Agents-Tab-Stub + Sammel-Gate"
+aktiver-auftrag: "#029 — P2c-S5 abgeschlossen, Phase-2c-Closure läuft"
+design-tail-backlog:
+  - VC-029-WAR (Minor): CSS-Schrift-Floor-Drift in `.tl-live-output` (Line 374) + `.tl-stacktrace` (Line 416) — 13.6px statt versprochener 14px im @media (max-width: 600px)-Block. 2-Zeilen-CSS-Patch. Reklassifiziert 2026-05-17 (Admin: „CSS ist Design-Thema, kommt später").
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -69,7 +71,7 @@ aktiver-auftrag: "#029 — P2c-S5 Polish + Agents-Tab-Stub + Sammel-Gate"
   - **Cross-Check-Scope (13. Anwendung):** bestehende Pakete `cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,ingest,ws}` müssen 0 Lines bleiben — `internal/dashboard/` (Polish + Defense-in-Depth-Rückport S3, Agents-Tab-Handler trivial), `web/templates/` (tab_agents.gohtml neu, Empty-/Error-States polish), `web/static/dashboard.css` (Konsolidierung + responsive), `internal/http/server.go` (ggf. Agents-Route falls eigener Endpoint — sonst nur Wildcard-Tab-Dispatch).
 - **Auto-Stop S5:** keine eingeplant. Falls Polish-Scope ausufert (mehr als Empty/Error/Mobile/CSS-Konsolidierung) — Stopp + Admin-Confirm. Falls Sammel-Gate Major-Findings über die Phase findet — Stopp + Findings-Gate, kein blindes Auto-Chain zur FF-Merge-Approval-Frage.
 - **Nach S5-QS-grün (Sammel-Gate):** Bericht an Admin mit FF-Merge-Approval-Frage (`feat/phase-2-dashboard` → `main`, `--ff-only`, Branch-Cleanup nach Merge). **Kein Auto-FF-Merge** — Admin-Confirm-pflichtig laut Default-Modus 5a.
-- **Status:** QS grün mit 1 Minor — wartet auf Chakotay-Findings-Gate (qs-20260516-005 freigabe / minor / 1 Finding VC-029-WAR)
+- **Status:** ✅ erledigt — Findings-Gate freigegeben (commit `7bfc769`), VC-029-WAR per Admin-Entscheidung 2026-05-17 als Design-Tail-Backlog reklassifiziert, Phase-2c-Closure (FF-Merge → main) approved.
 - **Verlauf:**
   - 2026-05-16T (Eröffnung) — chakotay: Admin „weiter" auf S5-Confirm-Frage. S5 = Sammel-Gate-Sub-Sprint mit 3 Polish-Bausteinen (Layout-Polish + Agents-Tab-Stub + Defense-in-Depth-Rückport) + Cross-Phase-Sammel-Gate-QS. Routet an belanna mit Mandat. Letzter Sub-Sprint vor Phase-2c-Closure mit FF-Merge nach `main`.
   - 2026-05-16T (Annahme + Delegation) — belanna: Auftrag angenommen, Klasse 🟡 feature mit 3 Polish-Bausteinen (Layout-Polish/Agents-Tab-Stub/Defense-in-Depth-Rückport) + Cross-Phase-Sammel-Gate als release-qs. Branch aktiv `feat/phase-2-dashboard` @ `42250f2`. Worker-Spawn ballard für die 3 Bausteine als kombinierter Auftrag (alle drei sind Polish-Charakter, kein Auto-Stop-Trigger zwischen ihnen). Auto-Stop nur bei Scope-Ausuferung. Nach Code-Done → Tuvok release-qs für Cross-Phase-Sammel-Gate über S1+S2+S3+S4+S5 zusammen (nicht nur S5-Sub-Sprint-QS), verifiziert alle 6 DoD-Punkte (a-f) aus Plan-Briefing 2c Block 1 + Cross-Sub-Sprint-Konsistenz + Wire-Stability + Cross-Compile-Final + Push-Ready.
@@ -79,6 +81,7 @@ aktiver-auftrag: "#029 — P2c-S5 Polish + Agents-Tab-Stub + Sammel-Gate"
     - **VC-029-WAR (🟢 Minor):** CSS-Comment-vs-Code-Drift in `web/static/dashboard.css`. `.tl-live-output` (Line 374) + `.tl-stacktrace` (Line 416) setzen `font-size: 0.85rem` (13.6px) und der Inline-Kommentar verspricht „bumped to 14 below in @media" — das Bumping fehlt aber im `@media (max-width: 600px)`-Block (Lines 427-451). Worker-Versprechen „Schrift-Floor 14px" funktional auf Phone nicht eingehalten in zwei Inset-Blöcken. Korrekturvorschlag: 2-Zeilen-CSS-Patch im @media-Block (`.tl-live-output, .tl-stacktrace { font-size: 0.875rem; }`). **Tuvok-Empfehlung:** in Findings-Gate-Sync-Commit miterledigen statt Backlog — kein Re-QS nötig wegen Trivialität.
     - Empfehlung: FF-Merge `feat/phase-2-dashboard` → `main` (--ff-only + Branch-Cleanup) nach Admin-Confirm. Sammel-Gate-Lerneffekt: Cross-Sub-Sprint-Konvention-Drift wird im Sammel-Gate gefunden, nicht in per-Sprint-QS.
     - Status `QS grün mit 1 Minor` — wartet auf Chakotay-Findings-Gate.
+  - 2026-05-17T (Findings-Gate + Admin-Entscheidung) — chakotay: Findings-Gate (`7bfc769`) bereits am 2026-05-16 freigegeben mit 1 Minor VC-029-WAR offen. Admin-Entscheidung 2026-05-17: „CSS ist Design-Thema, kommt später" → VC-029-WAR reklassifiziert als **Design-Tail-Backlog** (eigene Design-Phase), nicht im Closure-Sync mitfixen. FF-Merge `feat/phase-2-dashboard` → `main` (`--ff-only`) + Branch-Cleanup approved. Phase-2c-Closure startet.
 
 ---
 
