@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-4-von-5-durch — S4 (Crash-Inspector) QS-grün (qs-004 freigabe/none/0 Findings), wartet auf Chakotay-Findings-Gate (S1+S2+S3 QS-grün fc38460/cf850f8/220f445; S5 Polish+Sammel-Gate offen)
+status: phase-2c-4-von-5-durch — S5 (Polish + Agents-Tab-Stub + Sammel-Gate) eröffnet 2026-05-16 (S4 freigegeben eef2a6e, S1+S2+S3 fc38460/cf850f8/220f445); AUFTRAG #029 aktiv
 last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260516-004
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "#028 — P2c-S4 Crash-Inspector"
+aktiver-auftrag: "#029 — P2c-S5 Polish + Agents-Tab-Stub + Sammel-Gate"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -23,6 +23,55 @@ aktiver-auftrag: "#028 — P2c-S4 Crash-Inspector"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #029 — Tracelab P2c-S5 — Polish + Agents-Tab-Stub + Sammel-Gate (Phase-2c-Closure-Vorbereitung)
+
+- **Timestamp:** 2026-05-16T (Eröffnung, Auto-Continuation aus #028-Findings-Gate-Freigabe)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („weiter" nach #028-Gate-Freigabe + S5-Confirm-Frage) → Chakotay (S4 freigegeben `eef2a6e`, S5-Eröffnung mit Sammel-Gate-Charakter — letzter Sub-Sprint vor Phase-2c-Closure) → belanna
+- **Auftrag:** S5 von Phase 2c — **Polish + Agents-Tab-Stub + Sammel-Gate** (letzter Sub-Sprint, Phase-2c-Closure-Vorbereitung vor FF-Merge nach `main`). Drei Scope-Bausteine:
+  1. **Layout-Polish:** Empty-States vereinheitlichen, Error-States für die 4 Tabs, mobile-readable (Responsive-Check), CSS-Konsolidierung wo doppelt.
+  2. **Agents-Tab-Stub:** 4. Tab „Agents" rendern mit „Phase 2d — coming soon"-Hinweis (kein toter Link, kein 404). Schließt die DoD-Lücke aus Plan-Briefing 2c Block 1 (e).
+  3. **Defense-in-Depth-Rückport nach S3-`SessionDetailHandler`** (Bookmark aus #028): Triple-Layer-Check (chi-Wildcard-strip + raw-Validation + ParseInt → 404) aus S4-`CrashDetailHandler` rückportieren — kleine Posture-Verbesserung, S3+S4 dann konsistent.
+  4. **Sammel-Gate-QS** durch Tuvok über die gesamte Phase 2c (S1+S2+S3+S4+S5 zusammen) — Cross-Sub-Sprint-Konsistenz-Check, Wire-Stability, ADR-Closure-Status (ADR-011/012 Accepted), Cross-Compile-Final, Branch-Push-Ready-Verifikation vor FF-Merge.
+  - **Umbrella-Ref:** Phase 2c (5 Sub-Sprints, S1+S2+S3+S4 ✅)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2c-dashboard.md` (Sub-Sprint S5)
+  - **ADR-Stand:** ADR-011 + ADR-012 Accepted (beide aus S1/S2). Kein neuer ADR erwartet — S5 ist Polish + Closure-Vorbereitung.
+  - **Branch:** `feat/phase-2-dashboard` @ `eef2a6e` (S1+S2+S3+S4 darauf, gepusht)
+- **DoD S5:**
+  - **Polish:**
+    - Empty-States in allen 4 Tabs konsistent (Sessions / Live-Tail / Crashes / Agents) — gleiche Klassen, gleicher CTA-Stil, Session-Ref wo sinnvoll.
+    - Error-States (z.B. Store-nil-Pfad → einheitliche „Daemon not configured"-Meldung; htmx-Fehler → einheitliche Fehler-Card).
+    - Mobile-Readable: Tabellen sind scrollbar oder responsive collapsen, Schrift > 14px, Tap-Targets > 44px (Apple/Material-Konvention). Smoke-Test im Browser-DevTools auf mobile viewport.
+    - CSS-Konsolidierung: `dashboard.css` durchgehen, doppelte Selektoren mergen, Top-Frames-Ellipsis-Pattern wo wiederverwendbar.
+  - **Agents-Tab-Stub:**
+    - `web/templates/tab_agents.gohtml` (neu oder erweitert) mit „Phase 2d — Agents Stack" Header + „coming soon"-Body + Beschreibung was Phase 2d bringen wird (Skill-Spawn-Tree, Token-Usage, Mailbox-Traffic — Bezug auf Plan-File Sektion „Phase 2d").
+    - Tab-Navigation zeigt „Agents" als 4. Tab, nicht visuell deaktiviert — Klick führt zum Stub-Render. Stub ist gerendert, kein 404, kein leerer Container.
+    - Keine Backend-Logik — pure statische Template-Render mit hardgekodetem Inhalt. Test: `TestAgentsTabRendersComingSoon` (1 Test reicht).
+  - **Defense-in-Depth-Rückport nach S3:**
+    - `internal/dashboard/sessions.go` `SessionDetailHandler` bekommt analog zu S4-`CrashDetailHandler` den Triple-Layer-Check: chi-Wildcard-strip + `raw==""||strings.Contains(raw,"/")`-Check + Session-ID-Validation (ggf. Format-Check, abhängig von Session-ID-Schema).
+    - Bestehende S3-Tests bleiben grün, neuer Test `TestSessionDetailDefenseInDepth` (empty/embedded-slash/non-format) ergänzt.
+  - **Sammel-Gate-QS:**
+    - Tuvok release-qs über **Phase 2c gesamt** (S1+S2+S3+S4+S5 zusammen, nicht nur S5).
+    - DoD aus Plan-Briefing 2c Block 1: (a) `/dashboard` rendert, (b) Live-Tail E2E, (c) Session-Browser-Tabelle+Detail, (d) Crash-Inspector dedup+Fingerprint+Top-Frames, (e) Agents-Tab gerendert, (f) `go test -race ./...` grün + Sammel-Gate ohne offene Major.
+    - Cross-Sub-Sprint-Konsistenz: alle 4 Tabs verwenden gleiche Empty/Error-State-Pattern, gleiche htmx-Trigger-Konventionen, gleiche Pagination-Marker.
+    - Wire-Stability: keine breaking changes an Hub-Endpoints durch die Phase (S1-S5 alle additiv).
+    - Cross-Compile-Final: `make hub mcp mcp-windows hub-windows` produziert 4 saubere Binaries CGO-frei.
+    - Branch `feat/phase-2-dashboard` push-ready, `git merge-base --is-ancestor main HEAD` = false (kein behind), Repo clean.
+  - **Verifikation:** `go vet ./...` clean, `go test -race -count=1 ./...` über 12+ Pakete grün, `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` clean.
+  - **E2E-Smoke** auf Daemon mit Test-Sessions + Test-Crashes: alle 4 Tabs lädt, Mobile-Viewport-Smoke (DevTools 375px) hat keine Layout-Breaks, Agents-Tab zeigt „coming soon"-Stub.
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse `feature`, 3 Bausteine — Polish/Stub/Rückport, S3-/S4-Patterns als Vorlage).
+  - Sammel-Gate-Spawn an Tuvok (Klasse `release-qs`, Cross-Phase-Konsistenz).
+  - **Cross-Check-Scope (13. Anwendung):** bestehende Pakete `cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,ingest,ws}` müssen 0 Lines bleiben — `internal/dashboard/` (Polish + Defense-in-Depth-Rückport S3, Agents-Tab-Handler trivial), `web/templates/` (tab_agents.gohtml neu, Empty-/Error-States polish), `web/static/dashboard.css` (Konsolidierung + responsive), `internal/http/server.go` (ggf. Agents-Route falls eigener Endpoint — sonst nur Wildcard-Tab-Dispatch).
+- **Auto-Stop S5:** keine eingeplant. Falls Polish-Scope ausufert (mehr als Empty/Error/Mobile/CSS-Konsolidierung) — Stopp + Admin-Confirm. Falls Sammel-Gate Major-Findings über die Phase findet — Stopp + Findings-Gate, kein blindes Auto-Chain zur FF-Merge-Approval-Frage.
+- **Nach S5-QS-grün (Sammel-Gate):** Bericht an Admin mit FF-Merge-Approval-Frage (`feat/phase-2-dashboard` → `main`, `--ff-only`, Branch-Cleanup nach Merge). **Kein Auto-FF-Merge** — Admin-Confirm-pflichtig laut Default-Modus 5a.
+- **Status:** offen (eröffnet)
+- **Verlauf:**
+  - 2026-05-16T (Eröffnung) — chakotay: Admin „weiter" auf S5-Confirm-Frage. S5 = Sammel-Gate-Sub-Sprint mit 3 Polish-Bausteinen (Layout-Polish + Agents-Tab-Stub + Defense-in-Depth-Rückport) + Cross-Phase-Sammel-Gate-QS. Routet an belanna mit Mandat. Letzter Sub-Sprint vor Phase-2c-Closure mit FF-Merge nach `main`.
 
 ---
 
