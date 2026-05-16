@@ -1,15 +1,15 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2-tail-sprint — Phase 2c gemerged (`fca19d0`), Tail-Sprint #030 eröffnet (5 thematische Pakete M1-M10 + VC-029-WAR), Phase 2d (Agents-Stack mit ARCH-Vorab + Multi-Ingest SDK-Hooks/Transcript-Tail/MCP-Push) folgt nach Tail-Sprint-Merge.
+status: phase-2-tail-qs-grün — Worker (5 atomare Commits eb8ba6e..d9e70ef) + Sammel-Gate-QS (qs-20260517-001 freigabe/none/0 Findings + 5 Plus-Befunde) durch. Branch `chore/phase-2-tail` push-ready für FF-Merge nach `main`. Backlog-Staleness-Surprise (M2/M4/M5/M7-M10 bereits in #009 erledigt) als Methodik-Lerneffekt für künftige Tail-Sprints. Phase 2d (Agents-Stack ARCH-Vorab + Multi-Ingest) wartet auf Tail-Merge.
 last-updated: 2026-05-17
-qs-letzter-lauf: qs-20260516-005
+qs-letzter-lauf: qs-20260517-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
-aktiver-auftrag: "#030 — Phase-2-Tail (5 Pakete M1-M10 + VC-029-WAR + Sammel-Gate)"
+aktiver-auftrag: "#030 — Phase-2-Tail QS-grün, wartet auf Admin-FF-Merge-Confirm"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -56,10 +56,12 @@ aktiver-auftrag: "#030 — Phase-2-Tail (5 Pakete M1-M10 + VC-029-WAR + Sammel-G
   - Bei Major-Finding im Sammel-Gate → Stop + Findings-Gate (kein blindes Auto-Chain zur Merge-Frage)
 - **Nach Sammel-Gate-grün:** Bericht an Admin mit FF-Merge-Approval-Frage. **Kein Auto-FF-Merge** (Default-Modus 5a).
 - **Phase 2d wartet** — startet erst nach Tail-Sprint-Merge mit ARCH-Vorab-Sprint S0 (Ingest-Pipeline-Doku + Schema agent_spawns/agent_tokens/agent_verdicts + Endpoints) und Multi-Ingest-Architektur (SDK-Hooks PostToolUse/Stop + Transcript-Tail .jsonl + MCP-Push). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` wird nach Tail-Sprint-Merge angelegt.
-- **Status:** offen
+- **Status:** ✅ QS grün — wartet auf Admin-FF-Merge-Confirm `chore/phase-2-tail` → `main` (`--ff-only` + Branch-Cleanup)
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Tail-Sprint-Skelett (5 Pakete + Sammel-Gate, Defaults aus Phase-1-Tail-Pattern). Routet an belanna mit Mandat. Phase 2d steht in Auftragsbeschreibung als Folge-Auftrag (post-Merge).
   - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 5 thematischen Paketen (P1 Docs / P2 http / P3 crash / P4 store+adb / P5 design). Branch chore/phase-2-tail von main@9829679. Worker-Spawn ballard für alle 5 Pakete linear, kein Auto-Stop zwischen ihnen außer P4-UNIQUE-Migration-Frage. Sammel-Gate Tuvok nach Worker-Done.
+  - 2026-05-17T (QS-Lauf gestartet) — tuvok: Release-QS-Sammel-Gate über 5 Commits eb8ba6e..d9e70ef vor FF-Merge nach main.
+  - 2026-05-17T (QS grün) — tuvok: 0 Blocker / 0 Major / 0 Minor, Bericht qs-20260517-001. Plus-Befunde: TestUniqueIndexEnforcedAtSQLLayer pinnt UNIQUE per Raw-INSERT (P4-Mehrwert), Crash branch (d) ersetzt Skip-Test mit echtem Test + K1-Regression-Guard (P3), waitForSubs-Helper-Konsolidierung statt 4. Hand-Rolled-Sleep-Loop (P2). Empfehlung an Chakotay: FF-Merge freigegeben + Methodik-Lesson Pre-Sprint-Backlog-Verifikation (M2/M4/M5/M7-M10 waren bereits in #009 erledigt, Backlog-Liste im #030-Brief historisch veraltet — nicht-QS-Befund, aber lessons-würdig).
 
 ---
 
