@@ -22,7 +22,7 @@ import (
 // httptest.Server. The handler is the production handler under test.
 func newStreamServer(t *testing.T, hub *ws.Hub) (*httptest.Server, *dashboard.Handler) {
 	t.Helper()
-	h, err := dashboard.NewHandler("test", nil)
+	h, err := dashboard.NewHandler("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestSSESessionRequired(t *testing.T) {
 // register it. We verify the http layer's guard separately in
 // internal/http/dashboard_stream_wireup_test.go.
 func TestSSEHubNil(t *testing.T) {
-	h, err := dashboard.NewHandler("test", nil)
+	h, err := dashboard.NewHandler("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}

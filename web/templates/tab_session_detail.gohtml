@@ -1,0 +1,88 @@
+{{/*
+  tab_session_detail.gohtml — Session detail view (Phase 2c S3).
+
+  Rendered by SessionDetailHandler at GET /dashboard/tab/sessions/{id}.
+  Header shows session metadata + counts, then a list of recent events
+  (capped at the EventLimit) and crashes for the session. A back link
+  returns to the list view with the previous sort/filter/page query
+  preserved.
+
+  Dot value: sessionDetailViewData (sessions.go).
+*/}}
+<section class="tl-tab-panel tl-session-detail" data-tab="sessions" role="tabpanel">
+  <header class="tl-session-detail-header">
+    <a class="tl-back"
+       href="{{.BackURL}}"
+       hx-get="{{.BackURL}}"
+       hx-target="#dashboard-content"
+       hx-swap="innerHTML"
+       hx-push-url="true">&laquo; Back to sessions</a>
+    <h2>Session <span class="tl-mono">{{.Session.ID}}</span></h2>
+    <dl class="tl-session-meta">
+      <dt>Label</dt><dd>{{if .Session.Label}}{{.Session.Label}}{{else}}<span class="tl-muted">—</span>{{end}}</dd>
+      <dt>Started</dt><dd>{{.Session.StartedAtHuman}}</dd>
+      <dt>Ended</dt><dd>{{if .Session.EndedAtHuman}}{{.Session.EndedAtHuman}}{{else}}<span class="tl-muted">in progress</span>{{end}}</dd>
+      <dt>Events shown</dt><dd>{{.Session.EventCount}}</dd>
+      <dt>Crashes</dt><dd>{{.Session.CrashCount}}</dd>
+    </dl>
+  </header>
+
+  <h3>Events</h3>
+  {{if eq (len .Events) 0}}
+    <p class="tl-empty">No events recorded for this session.</p>
+  {{else}}
+    <table class="tl-events-table">
+      <thead>
+        <tr>
+          <th class="tl-num">Seq</th>
+          <th>Timestamp</th>
+          <th>Level</th>
+          <th>Source</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Events}}
+          <tr>
+            <td class="tl-num">{{.SeqID}}</td>
+            <td>{{.TSHuman}}</td>
+            <td class="tl-level tl-level-{{.Level}}">{{.Level}}</td>
+            <td class="tl-mono">{{.Source}}</td>
+            <td>{{.Msg}}</td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{if .EventLimitHit}}
+      <p class="tl-muted">Only the most recent {{.EventLimit}} events shown.
+        Older events are still in the store — use the CLI/MCP cursor reads
+        to walk further back.</p>
+    {{end}}
+  {{end}}
+
+  <h3>Crashes</h3>
+  {{if eq (len .Crashes) 0}}
+    <p class="tl-empty">No crashes detected for this session.</p>
+  {{else}}
+    <table class="tl-crashes-table">
+      <thead>
+        <tr>
+          <th class="tl-num">ID</th>
+          <th>Timestamp</th>
+          <th>Fingerprint</th>
+          <th class="tl-num">Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Crashes}}
+          <tr>
+            <td class="tl-num">{{.ID}}</td>
+            <td>{{.TSHuman}}</td>
+            <td class="tl-mono">{{.Fingerprint}}</td>
+            <td class="tl-num">{{.Count}}</td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{end}}
+</section>

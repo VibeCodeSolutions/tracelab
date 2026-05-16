@@ -14,7 +14,10 @@ const testVersion = "0.0.0-test"
 
 func newHandler(t *testing.T) *dashboard.Handler {
 	t.Helper()
-	h, err := dashboard.NewHandler(testVersion, nil)
+	// Skeleton-only tests pass nil store; the static-shell render
+	// path (tabTpl + LayoutHandler fallback) covers the sessions
+	// slug via the legacy placeholder until a Store is wired in.
+	h, err := dashboard.NewHandler(testVersion, nil, nil)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -98,7 +101,9 @@ func TestLayoutHandler_SelectActiveTabViaQuery(t *testing.T) {
 		wantBodyHas string
 	}{
 		{"live-tail", `id="live-tail-output"`},
-		{"sessions", "Sessions — Phase 2c S3"},
+		// sessions tab is now data-driven (Phase 2c S3); with the
+		// nil-store skeleton path it renders the empty view shell.
+		{"sessions", `class="tl-tab-panel tl-sessions"`},
 		{"crashes", "Crashes — Phase 2c S4"},
 		{"agents", "Agents — Phase 2d (coming soon)"},
 	}
@@ -155,7 +160,9 @@ func TestTabHandler_RendersBodyWithoutLayout(t *testing.T) {
 		wantBodyHas string
 	}{
 		{"live-tail", `id="live-tail-output"`},
-		{"sessions", "Sessions — Phase 2c S3"},
+		// sessions tab is now data-driven (Phase 2c S3); the
+		// nil-store skeleton path renders the empty view shell.
+		{"sessions", `class="tl-tab-panel tl-sessions"`},
 		{"crashes", "Crashes — Phase 2c S4"},
 		{"agents", "Agents — Phase 2d (coming soon)"},
 	}

@@ -124,6 +124,13 @@ func New(st *store.Store, cfg Config) http.Handler {
 	//                                  WS posture.
 	if cfg.Dashboard != nil {
 		r.Get("/dashboard", cfg.Dashboard.LayoutHandler)
+		// Phase 2c S3 — data-driven sessions tab. Registered BEFORE
+		// the wildcard /dashboard/tab/* so the explicit paths win the
+		// chi route match. The detail route lives at
+		// /dashboard/tab/sessions/{id}; the list route at
+		// /dashboard/tab/sessions returns the list-view body.
+		r.Get("/dashboard/tab/sessions", cfg.Dashboard.SessionsHandler)
+		r.Get("/dashboard/tab/sessions/{id}", cfg.Dashboard.SessionDetailHandler)
 		r.Get("/dashboard/tab/*", cfg.Dashboard.TabHandler)
 		r.Get("/dashboard/static/*", cfg.Dashboard.StaticHandler)
 		if cfg.Hub != nil {

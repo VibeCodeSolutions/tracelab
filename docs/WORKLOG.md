@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-s3-eroeffnet (S1+S2 freigegeben fc38460+cf850f8; S3 Session-Browser Auto-Chain nach #026 Freigabe — Tabelle + Filter/Sort/Pagination + Detail-View aus /sessions + /events)
+status: phase-2c-s3-code-done (S1+S2 freigegeben fc38460+cf850f8; S3 Session-Browser-Tab end-to-end implementiert — Store additiv ListSessionsWithCounts/CountSessions/SessionByID + Dashboard-Handler/Templates/Tests/E2E-Smoke grün; wartet auf belanna Auto-QS-Trigger tuvok)
 last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260516-002
 phase-1-merge-commit: cee7a5d
@@ -57,6 +57,16 @@ aktiver-auftrag: "#027 P2c-S3 Session-Browser — Tabelle + Sort/Filter/Paginati
 - **Status:** offen (eröffnet)
 - **Verlauf:**
   - 2026-05-16T (Eröffnung) — chakotay: Auto-Chain nach #026 Freigabe (`cf850f8`). Default-Modus aktiv, keine S3-Auto-Stops im Plan-Briefing 2c. S3 routet an belanna mit Session-Browser-Tab + Sort/Filter/Pagination + Detail-View. Bestehende Endpoints werden reused (`/sessions` + `/events`), neue aggregierte Counts nur falls additiv-trivial. ADR-Bedarf nicht erwartet — pure Render-Layer-Sprint.
+  - 2026-05-16T (Annahme + Delegation) — belanna: Auftrag angenommen, Klasse 🟡 feature (Session-Browser-Tab voll mit Server-side-Templating + ggf. additive Store-Query für Aggregat-Counts). Branch bereits aktiv (`feat/phase-2-dashboard` @ `b466daa`). Worker-Spawn ballard — klassische feature-Domain (Go-Render-Handler + Templates + Tests + ggf. trivial-additive Store-Method). Pre-Inspection-Mandat: ballard prüft zuerst ob `internal/store.ListSessions` Counts schon liefert oder ob `WithCounts`-Variante trivial-additiv anzulegen ist (Default-Hypothese: trivial-additiv mit COUNT-Subquery, kein Schema-Change-Auto-Stop). Falls nicht trivial → Stopp via chakotay. Auto-Stop-Liste: nur Schema-Change-Auto-Stop bei nicht-trivialer Aggregat-Strategie. Methodik-Bookmark beachtet: ADR-Konventionen-Promotion (3× stabil) bleibt Folge-Auftrag bei Phase-2c-Sammel-Gate-Outro, nicht in S3-Scope.
+  - 2026-05-16T (erledigt — ballard): Pre-Inspection-Verdikt **trivial-additiv** — `ListSessions` lieferte nur Metadaten, COUNT-Subquery via existierende Indizes (`idx_events_session_ts`, `idx_crashes_session_ts`) ist trivial, kein neuer ADR, kein Schema-Change. Lieferung:
+    - **Store (additiv):** `ListSessionsWithCounts(ctx, ListSessionsOpts)` mit typed `SessionSort`-Enum (Whitelist: started_at_desc/asc, session_id, event_count_desc), `FilterIDSubstring` via parameterisiertes LIKE, Limit+Offset. `CountSessions(ctx, filter)` für Pagination-Total. `SessionByID(ctx, id)` mit sql.ErrNoRows-Sentinel für Detail-View-404.
+    - **Dashboard-Handler (additiv):** `NewHandler(version, log, store)` (Signatur erweitert um Store-Param, nil bleibt für Skeleton-Tests akzeptiert). Neue `SessionsHandler` + `SessionDetailHandler` in `internal/dashboard/sessions.go`. `LayoutHandler`/`TabHandler` dispatchen via `renderTabBody` zum datengetriebenen Sessions-Body.
+    - **Templates:** `tab_sessions.gohtml` voll implementiert (Sort-Dropdown via htmx hx-trigger=change, Filter mit keyup delay 300ms, Tabelle mit klickbaren Rows, Pagination Prev/Next + Page-Indicator, Empty-State). Neues `tab_session_detail.gohtml` (Header + Events-Tabelle Limit 200 + Crashes + Back-Link mit RawQuery-Preserve).
+    - **Router:** `internal/http/server.go` ergänzt um 2 explizite Routes (`/dashboard/tab/sessions` + `/dashboard/tab/sessions/{id}`) vor dem Wildcard.
+    - **CSS:** `web/static/dashboard.css` erweitert (Tabellen, Pagination, Detail-Header — gleiche Designsprache wie S1+S2).
+    - **Tests:** `internal/store/sqlite_test.go` +5 Tests (HappyPath/Sort/Filter+Pagination/Count/ByID). `internal/dashboard/sessions_test.go` neu, 9 Tests (Empty, Seeded, Sort-Whitelist inkl. Injection-Defence, Filter-Substring, Pagination 3-Seiten + Last-Page-muted-Next, Detail-Render, Detail-404, BackURL-Query-Preserve, Page-Clamp). Bestehende Tests grün: handler_test/stream_test/dashboard_wireup_test angepasst (NewHandler-3-arg-Signatur, Body-Marker auf `tl-tab-panel tl-sessions`).
+    - **Verifikation:** `go vet ./...` clean; `go test -race -count=1 ./...` repo-weit grün; `go mod tidy` Diff=0; `make hub mcp mcp-windows hub-windows` clean (CGO-frei); E2E-Smoke gegen Daemon `127.0.0.1:28765` mit 3 Test-Sessions (S1=2 Events, S2=5 Events, S3=21 Events + Crash-Pattern) ergab korrekte Sort-/Filter-/Pagination-/Detail-/404-Outputs.
+    - Status `erledigt`, Auto-QS-Trigger via belanna folgt.
 
 ---
 

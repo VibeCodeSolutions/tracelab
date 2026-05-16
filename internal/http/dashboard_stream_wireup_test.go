@@ -28,7 +28,7 @@ func newDashboardStreamServer(t *testing.T) (*httptest.Server, *ws.Hub) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	dash, err := dashboard.NewHandler("test", nil)
+	dash, err := dashboard.NewHandler("test", nil, nil)
 	if err != nil {
 		t.Fatalf("dashboard.NewHandler: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestDashboardStream_NotRegisteredWhenHubNil(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	dash, err := dashboard.NewHandler("test", nil)
+	dash, err := dashboard.NewHandler("test", nil, nil)
 	if err != nil {
 		t.Fatalf("dashboard.NewHandler: %v", err)
 	}

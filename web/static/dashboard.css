@@ -149,3 +149,98 @@ html, body {
   margin: 0;
 }
 .tl-live-host { display: contents; }
+
+/* Sessions tab (Phase 2c S3) ----------------------------------------- */
+
+.tl-sessions-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+.tl-sessions-controls input[type="search"],
+.tl-sessions-controls select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+.tl-sessions-controls input[type="search"] {
+  flex: 1 1 18rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tl-sessions-table,
+.tl-events-table,
+.tl-crashes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+}
+.tl-sessions-table th,
+.tl-sessions-table td,
+.tl-events-table th,
+.tl-events-table td,
+.tl-crashes-table th,
+.tl-crashes-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+  vertical-align: top;
+}
+.tl-sessions-table th,
+.tl-events-table th,
+.tl-crashes-table th {
+  background: #f0f0f0;
+  font-weight: 600;
+}
+.tl-sessions-table .tl-num,
+.tl-events-table .tl-num,
+.tl-crashes-table .tl-num { text-align: right; font-variant-numeric: tabular-nums; }
+.tl-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-muted { color: #999; }
+.tl-empty {
+  padding: 1rem;
+  text-align: center;
+  color: #777;
+  background: #f5f5f5;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+}
+
+.tl-session-row:hover { background: #f8f8f8; }
+
+.tl-pagination {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.75rem 0;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+.tl-pagination a { color: #1a1a1a; text-decoration: none; padding: 0.3rem 0.6rem; border: 1px solid #c0c0c0; border-radius: 3px; background: #fafafa; }
+.tl-pagination a:hover { background: #eee; }
+.tl-page-indicator { color: #555; }
+
+.tl-session-detail-header { margin-bottom: 1rem; }
+.tl-back { color: #1a4f9e; text-decoration: none; }
+.tl-back:hover { text-decoration: underline; }
+
+.tl-session-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+.tl-session-meta dt { color: #555; font-weight: 600; }
+.tl-session-meta dd { margin: 0; }
+
+.tl-level { font-variant: small-caps; font-weight: 600; }
+.tl-level-error { color: #b00020; }
+.tl-level-warn  { color: #b07700; }
+.tl-level-info  { color: #1f7a1f; }

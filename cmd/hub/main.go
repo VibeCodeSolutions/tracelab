@@ -95,8 +95,10 @@ func run() error {
 
 	// Dashboard handler (Phase 2c S1, ADR-011). Template-parse failures
 	// surface here as a fatal start-up error — we refuse to come up with
-	// a broken UI rather than 500-ing on the first dashboard hit.
-	dashHandler, err := dashboard.NewHandler(version, logger)
+	// a broken UI rather than 500-ing on the first dashboard hit. The
+	// store is threaded through so the Phase 2c S3 data-driven tabs
+	// (sessions + detail view) can query it.
+	dashHandler, err := dashboard.NewHandler(version, logger, st)
 	if err != nil {
 		return fmt.Errorf("dashboard handler: %w", err)
 	}

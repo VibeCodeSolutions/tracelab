@@ -1,9 +1,97 @@
 {{/*
-  tab_sessions.gohtml — Sessions browser tab placeholder.
+  tab_sessions.gohtml — Sessions browser tab (Phase 2c S3).
 
-  S1: static placeholder. S3 fills in the session table + detail view.
+  Lists sessions in a paginated, sortable, filterable table. Each row
+  is clickable into the detail view (tab_session_detail.gohtml). The
+  whole body is htmx-swapped into #dashboard-content; sort/filter/page
+  controls re-target the same container via hx-get.
+
+  Dot value: sessionsViewData (sessions.go).
 */}}
-<section class="tl-tab-panel" data-tab="sessions" role="tabpanel">
+<section class="tl-tab-panel tl-sessions" data-tab="sessions" role="tabpanel">
   <h2>Sessions</h2>
-  <p class="tl-placeholder">Sessions — Phase 2c S3</p>
+
+  <form class="tl-sessions-controls"
+        hx-get="/dashboard/tab/sessions"
+        hx-target="#dashboard-content"
+        hx-swap="innerHTML"
+        hx-trigger="change from:select[name=sort], keyup changed delay:300ms from:input[name=filter], submit"
+        hx-push-url="true"
+        onsubmit="return false;">
+    <label for="sessions-sort">Sort</label>
+    <select id="sessions-sort" name="sort">
+      {{range .SortOptions}}
+        <option value="{{.Key}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>
+      {{end}}
+    </select>
+
+    <label for="sessions-filter">Filter</label>
+    <input type="search" id="sessions-filter" name="filter"
+           value="{{.Filter}}"
+           placeholder="session id substring"
+           autocomplete="off" spellcheck="false">
+
+    {{/* preserve current page+limit so manual reload doesn't reset */}}
+    <input type="hidden" name="page" value="{{.Page}}">
+    <input type="hidden" name="limit" value="{{.Limit}}">
+  </form>
+
+  {{if .Empty}}
+    <p class="tl-empty">No sessions found{{if .Filter}} for filter
+      &laquo;{{.Filter}}&raquo;{{end}}.</p>
+  {{else}}
+    <table class="tl-sessions-table">
+      <thead>
+        <tr>
+          <th>Session-ID</th>
+          <th>Started</th>
+          <th>Ended</th>
+          <th class="tl-num">Events</th>
+          <th class="tl-num">Crashes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Sessions}}
+          <tr class="tl-session-row"
+              hx-get="/dashboard/tab/sessions/{{.ID}}"
+              hx-target="#dashboard-content"
+              hx-swap="innerHTML"
+              hx-push-url="true"
+              style="cursor: pointer;">
+            <td class="tl-mono">{{.ID}}</td>
+            <td>{{.StartedAtHuman}}</td>
+            <td>{{if .EndedAtHuman}}{{.EndedAtHuman}}{{else}}<span class="tl-muted">—</span>{{end}}</td>
+            <td class="tl-num">{{.EventCount}}</td>
+            <td class="tl-num">{{.CrashCount}}</td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{end}}
+
+  <nav class="tl-pagination" aria-label="Sessions pagination">
+    {{if .HasPrev}}
+      <a href="{{.PrevURL}}"
+         hx-get="{{.PrevURL}}"
+         hx-target="#dashboard-content"
+         hx-swap="innerHTML"
+         hx-push-url="true">&laquo; Prev</a>
+    {{else}}
+      <span class="tl-muted">&laquo; Prev</span>
+    {{end}}
+
+    <span class="tl-page-indicator">
+      Page {{.Page}} of {{.PageCount}} &middot; {{.Total}} total
+    </span>
+
+    {{if .HasNext}}
+      <a href="{{.NextURL}}"
+         hx-get="{{.NextURL}}"
+         hx-target="#dashboard-content"
+         hx-swap="innerHTML"
+         hx-push-url="true">Next &raquo;</a>
+    {{else}}
+      <span class="tl-muted">Next &raquo;</span>
+    {{end}}
+  </nav>
 </section>

@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/VibeCodeSolutions/tracelab/internal/store"
 	"github.com/VibeCodeSolutions/tracelab/web"
 )
 
@@ -69,12 +70,29 @@ type layoutData struct {
 // Handler is the HTTP-handler bundle for the dashboard sub-router. It
 // is constructed once at hub start-up and shared across requests; all
 // state (template trees, static FS) is read-only.
+//
+// store is the persistence layer used by the data-driven tabs
+// (Phase 2c S3 sessions, S4 crashes). It may be nil in unit-test
+// contexts that only exercise the static-shell rendering (skeleton +
+// live-tail SSE), in which case the data-driven handlers return 503
+// rather than panicking.
 type Handler struct {
 	version string
 	log     *slog.Logger
+	store   *store.Store
 
 	layout *template.Template            // base.gohtml as the entrypoint
 	tabTpl map[string]*template.Template // slug → tab_<slug>.gohtml
+
+	// sessionsTpl renders the Phase 2c S3 session-browser tab body
+	// (templates/tab_sessions.gohtml) with a live data payload. Kept
+	// separate from tabTpl because the rest of tabTpl is rendered
+	// with nil data; here we need a typed dot value.
+	sessionsTpl *template.Template
+	// sessionDetailTpl renders the Phase 2c S3 session-detail view
+	// (templates/tab_session_detail.gohtml). Same rationale as
+	// sessionsTpl.
+	sessionDetailTpl *template.Template
 
 	staticHandler http.Handler // wraps web.Static for /dashboard/static/*
 }
@@ -83,7 +101,9 @@ type Handler struct {
 // static-asset sub-handler. version is the tracelab-hub semver
 // (rendered in the dashboard header). log is the slog handler used for
 // dashboard-side error logging; nil falls back to slog.Default().
-func NewHandler(version string, log *slog.Logger) (*Handler, error) {
+// st is the persistence layer used by data-driven tabs (S3 sessions,
+// S4 crashes); pass nil for tests that only need the static shell.
+func NewHandler(version string, log *slog.Logger, st *store.Store) (*Handler, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -111,6 +131,21 @@ func NewHandler(version string, log *slog.Logger) (*Handler, error) {
 		tabTpl[t.Slug] = tpl
 	}
 
+	// Phase 2c S3 data-driven templates. Parsed via fresh ParseFS
+	// passes so each gets its own root template namespace; the
+	// session-detail template is fully independent of the layout shell
+	// and the session-list shell (no template-block reuse needed).
+	sessionsTpl, err := template.ParseFS(web.Templates,
+		"templates/tab_sessions.gohtml")
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse sessions tab: %w", err)
+	}
+	sessionDetailTpl, err := template.ParseFS(web.Templates,
+		"templates/tab_session_detail.gohtml")
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse session-detail tab: %w", err)
+	}
+
 	// /dashboard/static/* serves the embedded JS/CSS verbatim. Sub-FS
 	// strips the leading "static/" so the URL path maps to file names
 	// directly (e.g. /dashboard/static/htmx.min.js → static/htmx.min.js
@@ -122,11 +157,14 @@ func NewHandler(version string, log *slog.Logger) (*Handler, error) {
 	staticHandler := http.StripPrefix("/dashboard/static/", http.FileServer(http.FS(sub)))
 
 	return &Handler{
-		version:       version,
-		log:           log,
-		layout:        layout,
-		tabTpl:        tabTpl,
-		staticHandler: staticHandler,
+		version:          version,
+		log:              log,
+		store:            st,
+		layout:           layout,
+		tabTpl:           tabTpl,
+		sessionsTpl:      sessionsTpl,
+		sessionDetailTpl: sessionDetailTpl,
+		staticHandler:    staticHandler,
 	}, nil
 }
 
@@ -139,7 +177,7 @@ func (h *Handler) LayoutHandler(w http.ResponseWriter, r *http.Request) {
 		slug = DefaultTab
 	}
 
-	body, err := h.renderTab(slug)
+	body, err := h.renderTabBody(r, slug)
 	if err != nil {
 		h.log.Error("dashboard layout: tab render failed",
 			slog.String("tab", slug), slog.Any("error", err))
@@ -161,12 +199,61 @@ func (h *Handler) LayoutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// renderTabBody is the dispatch point for "render this tab's body
+// bytes". Most tabs are static and go through renderTab (no request
+// data needed); the data-driven tabs (Phase 2c S3 sessions, future
+// S4 crashes) take the *http.Request so they can read query params.
+//
+// When the store is nil (skeleton-only tests) the data-driven tabs
+// render an empty view rather than 500-ing — the template still
+// executes against a zero-value sessionsViewData with empty Sessions
+// slice, so the tab body is well-formed and discoverable in the
+// rendered HTML.
+func (h *Handler) renderTabBody(r *http.Request, slug string) ([]byte, error) {
+	switch slug {
+	case "sessions":
+		if h.store != nil {
+			return h.renderSessionsBody(r)
+		}
+		return h.renderEmptySessionsBody()
+	default:
+		return h.renderTab(slug)
+	}
+}
+
+// renderEmptySessionsBody executes the sessions tab template against a
+// well-formed but empty view-data. Used in skeleton-only test
+// contexts where no store is wired in.
+func (h *Handler) renderEmptySessionsBody() ([]byte, error) {
+	view := sessionsViewData{
+		Sessions:    nil,
+		SortOptions: buildSortOptions(defaultSortKey),
+		Page:        1,
+		Limit:       SessionsPageSize,
+		Total:       0,
+		PageCount:   1,
+		Empty:       true,
+	}
+	var buf bytes.Buffer
+	if err := h.sessionsTpl.Execute(&buf, view); err != nil {
+		return nil, fmt.Errorf("execute empty sessions tab: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 // TabHandler renders GET /dashboard/tab/{slug} for htmx hx-get swaps.
 // The response is the tab body alone (no <html> envelope) so htmx can
 // drop it into #dashboard-content with hx-swap="innerHTML". Unknown
 // slugs return 404 (different posture from LayoutHandler — for the
 // xhr swap we want the error to surface so a stale page link fails
 // loud instead of silently rendering the default tab).
+//
+// The sessions tab and the session-detail sub-route own their own
+// http.HandlerFunc (SessionsHandler / SessionDetailHandler) because
+// they handle nested paths ("/dashboard/tab/sessions/{id}") that
+// don't fit the simple slug-to-template map this handler dispatches.
+// The router wires those before the wildcard, so TabHandler only
+// sees the static-template slugs at runtime.
 func (h *Handler) TabHandler(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/dashboard/tab/")
 	if slug == "" || strings.Contains(slug, "/") {
@@ -177,7 +264,7 @@ func (h *Handler) TabHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	body, err := h.renderTab(slug)
+	body, err := h.renderTabBody(r, slug)
 	if err != nil {
 		h.log.Error("dashboard tab: render failed",
 			slog.String("tab", slug), slog.Any("error", err))

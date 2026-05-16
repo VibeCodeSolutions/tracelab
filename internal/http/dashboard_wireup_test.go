@@ -26,7 +26,7 @@ func newDashboardServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	dash, err := dashboard.NewHandler("test", nil)
+	dash, err := dashboard.NewHandler("test", nil, st)
 	if err != nil {
 		t.Fatalf("dashboard.NewHandler: %v", err)
 	}
@@ -77,8 +77,13 @@ func TestDashboard_TabRoute(t *testing.T) {
 		t.Fatalf("status=%d, want 200", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Sessions — Phase 2c S3") {
-		t.Errorf("tab response missing placeholder body")
+	// Phase 2c S3 — sessions tab is now data-driven; we assert on the
+	// stable structural marker (panel class) rather than a placeholder
+	// string. The combined router test only verifies the route lands
+	// in the dashboard handler; the rich content + sort/filter/page
+	// behaviour is covered in internal/dashboard/sessions_test.go.
+	if !strings.Contains(string(body), `class="tl-tab-panel tl-sessions"`) {
+		t.Errorf("tab response missing sessions tab marker")
 	}
 }
 
