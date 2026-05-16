@@ -1,0 +1,58 @@
+{{/*
+  base.gohtml — Dashboard layout frame (Phase 2c S1, ADR-011 Decision 4).
+
+  Renders the outer shell: <head>, header bar, tab-navigation, content
+  slot, footer. The content slot is filled with the currently active
+  tab's template at first render; subsequent tab switches happen via
+  htmx hx-get into the #dashboard-content target.
+
+  Tabs (S1 placeholders, filled in by S2-S5):
+    live-tail  → tab_live_tail.gohtml   (S2)
+    sessions   → tab_sessions.gohtml    (S3)
+    crashes    → tab_crashes.gohtml     (S4)
+    agents     → tab_agents.gohtml      (S5 polish, P2d placeholder)
+
+  Data shape ({{.}}):
+    .Version    string  — tracelab-hub version (e.g. "0.1.0-dev")
+    .ActiveTab  string  — slug of the currently active tab
+    .Tabs       []Tab   — ordered tab list (Slug, Label, Active)
+    .Body       template.HTML — rendered active-tab body
+*/}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tracelab Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/static/dashboard.css">
+  <script src="/dashboard/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <header class="tl-header">
+    <h1>Tracelab</h1>
+    <span class="tl-version">v{{.Version}}</span>
+  </header>
+
+  <nav class="tl-tabs" role="tablist">
+    {{range .Tabs}}
+      <a class="tl-tab {{if .Active}}tl-tab-active{{end}}"
+         href="/dashboard?tab={{.Slug}}"
+         hx-get="/dashboard/tab/{{.Slug}}"
+         hx-target="#dashboard-content"
+         hx-swap="innerHTML"
+         hx-push-url="/dashboard?tab={{.Slug}}"
+         role="tab"
+         data-tab="{{.Slug}}">{{.Label}}</a>
+    {{end}}
+  </nav>
+
+  <main id="dashboard-content" class="tl-content">
+    {{.Body}}
+  </main>
+
+  <footer class="tl-footer">
+    <span>Phase 2c S1 skeleton — live-tail, sessions, crashes and agents
+      tabs fill in across S2–S5.</span>
+  </footer>
+</body>
+</html>

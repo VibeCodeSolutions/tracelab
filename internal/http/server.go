@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/VibeCodeSolutions/tracelab/internal/dashboard"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
 	"github.com/VibeCodeSolutions/tracelab/internal/ws"
 )
@@ -50,6 +51,25 @@ type Config struct {
 	// registered — POST /adb/start and POST /adb/stop may still be wired
 	// up via ADBManager alone, but device discovery is unavailable.
 	ADBDeviceLister ADBDeviceLister
+
+	// Dashboard is the dashboard handler bundle from internal/dashboard
+	// (Phase 2c, ADR-011 Decision 4). When non-nil, /dashboard and
+	// /dashboard/tab/{slug} and /dashboard/static/* are registered as a
+	// dedicated sub-router. When nil, the dashboard routes are omitted
+	// — production hubs always pass a non-nil handler (cmd/hub/main.go),
+	// HTTP-layer unit tests that don't exercise the dashboard pass nil.
+	//
+	// AUTH POSTURE (S1): the dashboard sub-router is registered WITHOUT
+	// bearer middleware. Browsers cannot attach an Authorization header
+	// to <script src=…> or <link href=…> loads, and the README's
+	// explicit "no token in query string" rule rules out the trivial
+	// query-token shortcut. The proper auth wrap (bearer-via-cookie or
+	// short-lived dashboard session token) is deferred to a follow-up
+	// ADR — see ADR-012-followup in docs/ARCH.md. The Phase-1 default
+	// bind is 127.0.0.1:8765 (loopback only), which is the operational
+	// assumption that keeps S1 acceptable: a single-user dev host with
+	// no remote dashboard access until the auth wrap lands.
+	Dashboard *dashboard.Handler
 }
 
 // ADBManager is re-exported from internal/adb at the HTTP-layer boundary
@@ -88,6 +108,18 @@ func New(st *store.Store, cfg Config) http.Handler {
 
 	// /healthz is intentionally outside the auth group.
 	r.Get("/healthz", h.healthz)
+
+	// /dashboard* — Phase 2c S1 (ADR-011). Registered outside the bearer
+	// group; see the Dashboard field doc on Config for the auth-posture
+	// rationale and the follow-up ADR pointer. Three routes:
+	//   GET /dashboard               — full layout (HTML)
+	//   GET /dashboard/tab/{slug}    — single tab body for htmx swap
+	//   GET /dashboard/static/*      — embedded JS / CSS
+	if cfg.Dashboard != nil {
+		r.Get("/dashboard", cfg.Dashboard.LayoutHandler)
+		r.Get("/dashboard/tab/*", cfg.Dashboard.TabHandler)
+		r.Get("/dashboard/static/*", cfg.Dashboard.StaticHandler)
+	}
 
 	// /tail is auth-protected (registered in the pr group below) but must
 	// NOT be wrapped by middleware.Timeout — chi's Timeout uses

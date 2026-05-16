@@ -13,7 +13,9 @@ partition, so the same history is available regardless of which OS is booted.
 - **`tracelab` CLI** — `run`, `tail`, `sessions`, `adb` for the terminal.
 - **`tracelab-mcp`** — MCP server so Claude Code can query sessions, tail
   logs, inspect crashes, and drive Android devices via adb.
-- **Dashboard** *(later)* — web UI for live tail and session browsing.
+- **Dashboard** — web UI for live tail, session browsing and crash
+  inspection. Phase 2c S1 ships the skeleton (layout + 4-tab navigation
+  + embedded htmx/CSS); S2–S5 fill the tab bodies.
 
 ## Status
 
@@ -58,6 +60,18 @@ the token with `openssl rand -hex 32`.
 | GET    | `/events`        | yes  | Forward-cursor read: `?session=<id>&since_seq=<n>&limit=<n>` returns `{events, next_since_seq}` (Phase 2b S4, ADR-008). |
 | GET    | `/crashes`       | yes  | Session-scoped crash digest, newest first: `?session=<id>&limit=<n>` returns `{crashes}` (Phase 2b S6, ADR-009). |
 | GET    | `/tail`          | yes  | WebSocket fan-out, optional `?session=<id>` filter. |
+| GET    | `/dashboard`     | no¹  | Web dashboard (Phase 2c S1 skeleton). Optional `?tab=<slug>` (`live-tail`/`sessions`/`crashes`/`agents`). |
+| GET    | `/dashboard/tab/{slug}` | no¹ | Tab body for htmx partial-swap. |
+| GET    | `/dashboard/static/*`   | no¹ | Embedded JS/CSS (htmx, dashboard.css). |
+
+¹ Phase 2c S1 leaves the dashboard sub-router *unauthenticated*: browsers
+cannot attach an `Authorization:` header to `<script src=…>` / page loads,
+and a query-string token contradicts the API rule below. A cookie-based
+auth wrap (or a short-lived dashboard session token) is the subject of an
+upcoming ADR — see `docs/ARCH.md` ADR-011 *Consequences* and the
+ADR-012 follow-up bookmark. Until then the operational assumption is the
+Phase-1 default bind `127.0.0.1:8765` (loopback only, single-user dev
+host).
 
 The token must be sent as an `Authorization: Bearer <token>` **header** —
 the hub does not accept the token as a query string parameter (also not on

@@ -24,6 +24,7 @@ import (
 
 	"github.com/VibeCodeSolutions/tracelab/internal/adb"
 	"github.com/VibeCodeSolutions/tracelab/internal/config"
+	"github.com/VibeCodeSolutions/tracelab/internal/dashboard"
 	httplayer "github.com/VibeCodeSolutions/tracelab/internal/http"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
 	"github.com/VibeCodeSolutions/tracelab/internal/ws"
@@ -92,6 +93,14 @@ func run() error {
 	})
 	defer adbMgr.Close()
 
+	// Dashboard handler (Phase 2c S1, ADR-011). Template-parse failures
+	// surface here as a fatal start-up error — we refuse to come up with
+	// a broken UI rather than 500-ing on the first dashboard hit.
+	dashHandler, err := dashboard.NewHandler(version, logger)
+	if err != nil {
+		return fmt.Errorf("dashboard handler: %w", err)
+	}
+
 	addr := cfg.Server.Bind + ":" + strconv.Itoa(cfg.Server.Port)
 	handler := httplayer.New(st, httplayer.Config{
 		AuthToken:       cfg.Auth.Token,
@@ -101,6 +110,7 @@ func run() error {
 		Hub:             hub,
 		ADBManager:      adbMgr,
 		ADBDeviceLister: adbDeviceListerFunc(adb.Devices),
+		Dashboard:       dashHandler,
 	})
 	if handler == nil {
 		return errors.New("http: New returned nil (auth token empty?)")

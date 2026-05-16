@@ -1,0 +1,29 @@
+htmx.min.js — vendored pin
+==========================
+
+Version : 2.0.4
+Source  : https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js
+SHA256  : e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447
+Bytes   : 50917
+Pinned  : 2026-05-16 (Phase 2c S1, ADR-011 Decision 3)
+
+Upgrade procedure
+-----------------
+
+A version bump is an explicit commit touching this file plus
+htmx.min.js. Steps:
+
+  curl -sSL -o web/static/htmx.min.js \
+      https://unpkg.com/htmx.org@<NEW>/dist/htmx.min.js
+  sha256sum web/static/htmx.min.js
+
+Update Version / Source / SHA256 / Bytes / Pinned in this file. The
+dashboard skeleton smoke test must still pass:
+
+  go test -race -count=1 ./internal/dashboard/...
+
+License
+-------
+
+htmx is released under the Zero-Clause BSD License (0BSD). See
+https://htmx.org/ and https://github.com/bigskysoftware/htmx.
