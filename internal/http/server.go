@@ -131,6 +131,10 @@ func New(st *store.Store, cfg Config) http.Handler {
 		// /dashboard/tab/sessions returns the list-view body.
 		r.Get("/dashboard/tab/sessions", cfg.Dashboard.SessionsHandler)
 		r.Get("/dashboard/tab/sessions/{id}", cfg.Dashboard.SessionDetailHandler)
+		// Phase 2c S4 — data-driven crashes tab. Same "explicit-before-
+		// wildcard" pattern as the S3 sessions pair.
+		r.Get("/dashboard/tab/crashes", cfg.Dashboard.CrashesHandler)
+		r.Get("/dashboard/tab/crashes/{id}", cfg.Dashboard.CrashDetailHandler)
 		r.Get("/dashboard/tab/*", cfg.Dashboard.TabHandler)
 		r.Get("/dashboard/static/*", cfg.Dashboard.StaticHandler)
 		if cfg.Hub != nil {

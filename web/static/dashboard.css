@@ -244,3 +244,63 @@ html, body {
 .tl-level-error { color: #b00020; }
 .tl-level-warn  { color: #b07700; }
 .tl-level-info  { color: #1f7a1f; }
+
+/* Crashes tab (Phase 2c S4) ------------------------------------------ */
+
+.tl-crashes-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+.tl-crashes-controls select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.tl-crash-row:hover { background: #f8f8f8; }
+
+/* Top-frames preview list inside the crashes table cells: compact,
+ * monospace, no bullet markers. Each line truncates with ellipsis so
+ * a verbose frame doesn't blow the row height. */
+.tl-frames-preview {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+.tl-frames-preview li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 32rem;
+}
+
+.tl-crash-detail-header { margin-bottom: 1rem; }
+.tl-crash-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+.tl-crash-meta dt { color: #555; font-weight: 600; }
+.tl-crash-meta dd { margin: 0; }
+
+.tl-stacktrace {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  padding: 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}

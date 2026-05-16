@@ -94,6 +94,15 @@ type Handler struct {
 	// sessionsTpl.
 	sessionDetailTpl *template.Template
 
+	// crashesTpl renders the Phase 2c S4 crash-inspector tab body
+	// (templates/tab_crashes.gohtml) with a live data payload. Same
+	// "typed dot, separate ParseFS pass" pattern as sessionsTpl.
+	crashesTpl *template.Template
+	// crashDetailTpl renders the Phase 2c S4 crash-detail view
+	// (templates/tab_crash_detail.gohtml) — full stacktrace and the
+	// back-link to the list view.
+	crashDetailTpl *template.Template
+
 	staticHandler http.Handler // wraps web.Static for /dashboard/static/*
 }
 
@@ -146,6 +155,19 @@ func NewHandler(version string, log *slog.Logger, st *store.Store) (*Handler, er
 		return nil, fmt.Errorf("dashboard: parse session-detail tab: %w", err)
 	}
 
+	// Phase 2c S4 data-driven templates. Parsed in fresh ParseFS passes
+	// for the same root-namespace-isolation reason as the S3 pair.
+	crashesTpl, err := template.ParseFS(web.Templates,
+		"templates/tab_crashes.gohtml")
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse crashes tab: %w", err)
+	}
+	crashDetailTpl, err := template.ParseFS(web.Templates,
+		"templates/tab_crash_detail.gohtml")
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse crash-detail tab: %w", err)
+	}
+
 	// /dashboard/static/* serves the embedded JS/CSS verbatim. Sub-FS
 	// strips the leading "static/" so the URL path maps to file names
 	// directly (e.g. /dashboard/static/htmx.min.js → static/htmx.min.js
@@ -164,6 +186,8 @@ func NewHandler(version string, log *slog.Logger, st *store.Store) (*Handler, er
 		tabTpl:           tabTpl,
 		sessionsTpl:      sessionsTpl,
 		sessionDetailTpl: sessionDetailTpl,
+		crashesTpl:       crashesTpl,
+		crashDetailTpl:   crashDetailTpl,
 		staticHandler:    staticHandler,
 	}, nil
 }
@@ -216,6 +240,11 @@ func (h *Handler) renderTabBody(r *http.Request, slug string) ([]byte, error) {
 			return h.renderSessionsBody(r)
 		}
 		return h.renderEmptySessionsBody()
+	case "crashes":
+		if h.store != nil {
+			return h.renderCrashesBody(r)
+		}
+		return h.renderEmptyCrashesBody()
 	default:
 		return h.renderTab(slug)
 	}
@@ -237,6 +266,27 @@ func (h *Handler) renderEmptySessionsBody() ([]byte, error) {
 	var buf bytes.Buffer
 	if err := h.sessionsTpl.Execute(&buf, view); err != nil {
 		return nil, fmt.Errorf("execute empty sessions tab: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// renderEmptyCrashesBody executes the crashes tab template against a
+// well-formed but empty view-data. Mirrors renderEmptySessionsBody for
+// the no-store skeleton path.
+func (h *Handler) renderEmptyCrashesBody() ([]byte, error) {
+	view := crashesViewData{
+		Crashes:        nil,
+		SortOptions:    buildCrashSortOptions(defaultCrashSortKey),
+		SessionOptions: buildSessionFilterOptions(nil, ""),
+		Page:           1,
+		Limit:          CrashesPageSize,
+		Total:          0,
+		PageCount:      1,
+		Empty:          true,
+	}
+	var buf bytes.Buffer
+	if err := h.crashesTpl.Execute(&buf, view); err != nil {
+		return nil, fmt.Errorf("execute empty crashes tab: %w", err)
 	}
 	return buf.Bytes(), nil
 }

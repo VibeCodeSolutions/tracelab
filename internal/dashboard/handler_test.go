@@ -104,7 +104,9 @@ func TestLayoutHandler_SelectActiveTabViaQuery(t *testing.T) {
 		// sessions tab is now data-driven (Phase 2c S3); with the
 		// nil-store skeleton path it renders the empty view shell.
 		{"sessions", `class="tl-tab-panel tl-sessions"`},
-		{"crashes", "Crashes — Phase 2c S4"},
+		// crashes tab is data-driven (Phase 2c S4); nil-store path
+		// renders the empty crashes panel.
+		{"crashes", `class="tl-tab-panel tl-crashes"`},
 		{"agents", "Agents — Phase 2d (coming soon)"},
 	}
 	for _, c := range cases {
@@ -163,7 +165,9 @@ func TestTabHandler_RendersBodyWithoutLayout(t *testing.T) {
 		// sessions tab is now data-driven (Phase 2c S3); the
 		// nil-store skeleton path renders the empty view shell.
 		{"sessions", `class="tl-tab-panel tl-sessions"`},
-		{"crashes", "Crashes — Phase 2c S4"},
+		// crashes tab is data-driven (Phase 2c S4); nil-store path
+		// renders the empty crashes panel.
+		{"crashes", `class="tl-tab-panel tl-crashes"`},
 		{"agents", "Agents — Phase 2d (coming soon)"},
 	}
 	for _, c := range cases {

@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-3-von-5-durch — S4 (Crash-Inspector) eröffnet 2026-05-16 in neuer Session, AUFTRAG #028 aktiv (S1+S2+S3 QS-grün fc38460/cf850f8/220f445; S5 Polish+Sammel-Gate offen)
+status: phase-2c-3-von-5-durch — S4 (Crash-Inspector) ballard-erledigt 2026-05-16, wartet auf Belanna-QS-Trigger (S1+S2+S3 QS-grün fc38460/cf850f8/220f445; S5 Polish+Sammel-Gate offen)
 last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260516-003
 phase-1-merge-commit: cee7a5d
@@ -53,9 +53,21 @@ aktiver-auftrag: "#028 — P2c-S4 Crash-Inspector"
   - **Crash-Detector-Pattern-Sample:** Realistisches Java-Stacktrace-Sample für E2E-Smoke verwenden (Hinweis aus S3-Bericht), damit Detector tatsächlich Crashes erkennt.
 - **Auto-Stop S4:** keine eingeplant. Falls Fingerprint-Gruppierung nicht trivial-additiv: Stopp + Admin-Confirm via chakotay.
 - **Nach S4-QS-grün:** Auto-Chain zu S5 (Polish + Agents-Tab-Stub + Sammel-Gate) — letzter Sub-Sprint vor Phase-2c-Closure. Token-Budget der Hauptsession bei S5-Eintritt prüfen (Konservatismus aus S3-Outro).
-- **Status:** offen (eröffnet)
+- **Status:** in Arbeit (angenommen, Worker-Spawn ballard)
 - **Verlauf:**
   - 2026-05-16T (Eröffnung, neue Session) — chakotay: Resume nach Session-Pause. S1-S3 alle QS-grün, S4 wartet seit Pause (`5763028`). Admin-„ja" auf S4-Routing-Frage. Plan-Briefing 2c bleibt aktiv (Default-Modus + Auto-Continuation), keine S4-spezifischen Auto-Stops im Plan. S4 routet an belanna mit Crash-Inspector-Tab + Fingerprint-Gruppierung + Stacktrace-Detail-View. `/crashes`-Endpoint + `CrashesBySession`-Store-Method aus P2b-S6 sind Bestand. Folge-Hinweis aus S3: realistisches Crash-Pattern für E2E-Smoke verwenden.
+  - 2026-05-16T (Annahme + Delegation) — belanna: Auftrag angenommen, Klasse 🟡 feature (Crash-Inspector-Tab voll mit Fingerprint-Gruppierung + Stacktrace-Detail-View, ggf. additive Store-Methode für Aggregation). Branch aktiv (`feat/phase-2-dashboard` @ `4a1c817`). Worker-Spawn ballard analog S3 (Go-Render-Handler + Templates + Tests + ggf. trivial-additive Store-Method). Pre-Inspection-Mandat: ballard prüft ob bestehende `CrashesBySession` für Fingerprint-Gruppierung ausreicht (Template-seitig) oder ob `CrashesGroupedByFingerprint`-Variante trivial-additiv angelegt werden soll (Default-Hypothese: trivial-additiv mit GROUP BY fingerprint + MIN/MAX-Timestamp + COUNT, kein Schema-Change-Auto-Stop). Falls nicht trivial → Stopp via chakotay. Auto-Stop-Liste: Schema-Change-Auto-Stop bei nicht-trivialer Aggregat-Strategie. E2E-Smoke-Pflicht: realistisches Java-Stacktrace-Sample (S3-Hinweis), das den Detector tatsächlich triggert.
+  - 2026-05-16T (erledigt — ballard): Pre-Inspection-Verdikt **trivial-additiv** — das `crashes`-Schema enforced bereits UNIQUE(session_id, fingerprint) via `idx_crashes_session_fp`, `UpsertCrash` bumpt `count`+`ts` für Duplikate, jede Zeile in der Tabelle ist also bereits der deduplizierte Repräsentant. Kein GROUP BY nötig, kein Schema-Change. Lieferung:
+    - **Store (additiv):** `ListCrashes(ctx, ListCrashesOpts)` mit typed `CrashSort`-Enum (Whitelist: ts_desc/asc, count_desc, fingerprint_asc), `FilterSessionID`-Param, Limit+Offset. `CountCrashes(ctx, filterSessionID)` für Pagination-Total. `CrashByID(ctx, id)` mit sql.ErrNoRows-Sentinel für Detail-View-404. `ListSessionIDsWithCrashes(ctx)` für Session-Filter-Dropdown.
+    - **Dashboard-Handler (additiv):** Neue `CrashesHandler` + `CrashDetailHandler` in `internal/dashboard/crashes.go`. `renderTabBody` dispatcht via neuem `crashes`-case auf den datengetriebenen Body, `renderEmptyCrashesBody` für nil-Store-Skeleton-Tests. Handler-Bundle um `crashesTpl` + `crashDetailTpl` erweitert.
+    - **Templates:** `tab_crashes.gohtml` voll implementiert (Sort-Dropdown + Session-Filter-Dropdown via htmx hx-trigger=change, Tabelle mit Fingerprint/Session/Count/Last-seen/Top-3-Frames-Preview, klickbare Rows, Pagination, Empty-State). Neues `tab_crash_detail.gohtml` (Header mit Fingerprint/Session/Count/Last-seen, volle Stacktrace als <pre class="tl-stacktrace">, Back-Link mit RawQuery-Preserve, graceful Empty-Stacktrace).
+    - **Router:** `internal/http/server.go` ergänzt um 2 explizite Routes (`/dashboard/tab/crashes` + `/dashboard/tab/crashes/{id}`) vor dem Wildcard, identisch zum S3-Pattern.
+    - **CSS:** `web/static/dashboard.css` erweitert (Crashes-Controls, Top-Frames-Preview-Liste mit ellipsis, Crash-Detail-Header, Stacktrace-Block in dunklem Mono-Style — gleiche Designsprache wie S1+S2+S3).
+    - **Tests:** `internal/dashboard/crashes_test.go` neu mit 8 Tests (Empty, Seeded-with-Dedup, Session-Filter-Forwarding, Sort-Whitelist mit Injection-Check, Detail-Render-with-Full-Stack, Detail-404-Unknown-und-Non-Numeric, BackURL-Preserve, Empty-Stacktrace-Graceful, Pagination). `handler_test.go` zwei `crashes`-Marker-Cases auf datengetriebene Tab-Panel-Klasse aktualisiert.
+    - **Verifikation:** `go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün (12 Pakete), `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` clean (CGO-frei).
+    - **E2E-Smoke:** Daemon `127.0.0.1:28765` mit 2 Sessions, ingest mit 2 Java-Stacks (NullPointer 2× + IllegalArgument 1× in S1) + 1 Kotlin-Stack (S2) — Detector triggerte für alle 3, Dedup wirkte (NullPointer count=2), `/dashboard/tab/crashes` zeigt 3 Fingerprints, Session-Filter S1 versteckt korrekt das Kotlin-Crash aus S2, Detail-View rendert volle Stacktrace inkl. deep-frame App.java:7, Back-Link mit `sort=count_desc&page=1` preserved, unknown id `999` → HTTP 404.
+    - **Cross-Check-Scope:** `git diff cf850f8..HEAD` für `cmd/{cli,mcp}` + `internal/{adb,client,config,cliconfig,crash,ingest,ws}` = 0 Bytes; `cmd/hub` 0 Bytes addiert (Signatur seit S3 erweitert).
+    - **Status:** erledigt — wartet auf Belanna-QS-Trigger (Tuvok-Findings-Gate analog #026/#027).
 
 ---
 

@@ -1,0 +1,35 @@
+{{/*
+  tab_crash_detail.gohtml — Crash detail view (Phase 2c S4).
+
+  Rendered by CrashDetailHandler at GET /dashboard/tab/crashes/{id}.
+  Header shows fingerprint + session + count + last-seen, body is the
+  full stacktrace rendered as <pre>. A back link returns to the list
+  view with the previous sort/session/page query preserved.
+
+  Dot value: crashDetailViewData (crashes.go).
+*/}}
+<section class="tl-tab-panel tl-crash-detail" data-tab="crashes" role="tabpanel">
+  <header class="tl-crash-detail-header">
+    <a class="tl-back"
+       href="{{.BackURL}}"
+       hx-get="{{.BackURL}}"
+       hx-target="#dashboard-content"
+       hx-swap="innerHTML"
+       hx-push-url="true">&laquo; Back to crashes</a>
+    <h2>Crash <span class="tl-mono">{{.Fingerprint}}</span></h2>
+    <dl class="tl-crash-meta">
+      <dt>Session</dt><dd class="tl-mono">{{.SessionID}}</dd>
+      <dt>Fingerprint</dt><dd class="tl-mono">{{.Fingerprint}}</dd>
+      <dt>Occurrences</dt><dd>{{.Count}}</dd>
+      <dt>Last seen</dt><dd>{{.LastSeenHuman}}</dd>
+    </dl>
+  </header>
+
+  <h3>Stacktrace</h3>
+  {{if eq (len .StackLines) 0}}
+    <p class="tl-empty">No stacktrace recorded for this crash.</p>
+  {{else}}
+    <pre class="tl-stacktrace">{{range .StackLines}}{{.}}
+{{end}}</pre>
+  {{end}}
+</section>
