@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2c-3-von-5-durch (S1+S2+S3 alle QS-grün fc38460/cf850f8/220f445; S4 Crash-Inspector + S5 Polish+Sammel-Gate offen; Session pausiert 2026-05-16 nach 3 Sub-Sprints — S4 wartet auf Session-Resume)
+status: phase-2c-3-von-5-durch — S4 (Crash-Inspector) eröffnet 2026-05-16 in neuer Session, AUFTRAG #028 aktiv (S1+S2+S3 QS-grün fc38460/cf850f8/220f445; S5 Polish+Sammel-Gate offen)
 last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260516-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "—"
+aktiver-auftrag: "#028 — P2c-S4 Crash-Inspector"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -23,6 +23,39 @@ aktiver-auftrag: "—"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #028 — Tracelab P2c-S4 — Crash-Inspector (deduplicated Crashes pro Session + Fingerprint + Top-Frames + Stacktrace-View)
+
+- **Timestamp:** 2026-05-16T (Eröffnung, neue Session)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („weiter mit tracelab" + „ja" zu S4-Routing, 2026-05-16) → Chakotay (Session-Resume nach Pause, Plan-Briefing 2c bleibt aktiv inkl. Default-Modus + Auto-Continuation) → belanna
+- **Auftrag:** S4 von Phase 2c — **Crash-Inspector-Tab end-to-end**. Deduplicated Crashes pro Session anzeigen mit Fingerprint, Count, Timestamp, Top-3-Frames. Klick → vollständige Stacktrace-Detail-View. Reuse 2b-S6-Endpoint `/crashes` (Store-Method `CrashesBySession` aus P2b-S6 ist Bestand).
+  - **Umbrella-Ref:** Phase 2c (5 Sub-Sprints, S1+S2+S3 ✅)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2c-dashboard.md` (Sub-Sprint S4)
+  - **ADR-Stand:** ADR-011 Accepted (Render-Stack), ADR-012 Accepted (SSE). Kein neuer ADR erwartet — Crash-Inspector ist Server-Render-Layer auf bestehendem `/crashes`-Endpoint.
+  - **Branch:** `feat/phase-2-dashboard` @ `5763028` (aktiv, S1+S2+S3 darauf)
+- **DoD S4:**
+  - **Crash-Inspector-Tab** in `web/templates/tab_crashes.gohtml` voll implementiert: Tabelle pro Session mit Spalten (Fingerprint/Count/Erst-Timestamp/Letzt-Timestamp/Top-3-Frames-Preview), gruppiert pro Session.
+  - **Session-Filter-Dropdown:** Auswahl einer Session zeigt nur deren Crashes (oder "Alle Sessions" für globale Sicht). htmx-Trigger=change auf `/dashboard/tab/crashes?session=…`.
+  - **Detail-View:** Klick auf Crash-Row öffnet htmx-Swap mit vollständiger Stacktrace (alle Frames, nicht nur Top-3). Optional: Back-Button mit Query-Preserve analog S3.
+  - **Bestehende Endpoints reuse:** `/crashes?session=…` für gefilterte Liste. Falls aggregierte Counts/Fingerprint-Gruppierung am Server gewünscht (statt im Template), additiv eine `CrashesGroupedByFingerprint`-Store-Methode — Lead-Empfehlung in Pre-Inspection notieren, autonome Entscheidung wenn additiv-trivial (analog S3-Pattern).
+  - **Defensive Patterns:** Unknown-Session/Crash → 404 in Detail-View, leere Result-Sets → „No crashes found"-Empty-State, Crash ohne Stacktrace → graceful „—" statt blank.
+  - **Tests:** `internal/dashboard/crashes_test.go` (neu, mindestens 5 Tests: Tab-Render-Empty, Tab-Render-with-Crashes-Mock, Session-Filter-Param-Forwarding, Fingerprint-Gruppierung, Detail-View-Render, Detail-404). Bestehende Tests grün.
+  - **`go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün, `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` clean.
+  - **E2E-Smoke:** Daemon mit Test-Sessions inkl. realistischen Crash-Patterns (Java-Stacktrace, das den Detector tatsächlich triggert — Folge-Hinweis aus S3-Bericht beachten), Browser `/dashboard` → Crashes-Tab → Liste sichtbar mit Fingerprint-Gruppierung, Session-Filter funktioniert, Klick öffnet vollen Stacktrace.
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse `feature`, neuer Crash-Inspector-Tab mit htmx-Templating + Tests, S3-Pattern als Vorlage).
+  - Falls Fingerprint-Gruppierung server-seitig (additive Store-Methode) sinnvoller als template-seitig: additive Server-Erweiterung, im Bericht begründen, Cross-Check-Scope-Touch dokumentieren.
+  - **Cross-Check-Scope (12. Anwendung):** bestehende Pakete `cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,ingest,ws}` müssen 0 Lines bleiben — `internal/store` ggf. additiv (neue Aggregat-Methode), `internal/http/server.go` ggf. Route-Add wenn neuer Endpoint, `internal/dashboard/` + `web/templates/tab_crashes.gohtml` + Tests erwartet.
+  - **Crash-Detector-Pattern-Sample:** Realistisches Java-Stacktrace-Sample für E2E-Smoke verwenden (Hinweis aus S3-Bericht), damit Detector tatsächlich Crashes erkennt.
+- **Auto-Stop S4:** keine eingeplant. Falls Fingerprint-Gruppierung nicht trivial-additiv: Stopp + Admin-Confirm via chakotay.
+- **Nach S4-QS-grün:** Auto-Chain zu S5 (Polish + Agents-Tab-Stub + Sammel-Gate) — letzter Sub-Sprint vor Phase-2c-Closure. Token-Budget der Hauptsession bei S5-Eintritt prüfen (Konservatismus aus S3-Outro).
+- **Status:** offen (eröffnet)
+- **Verlauf:**
+  - 2026-05-16T (Eröffnung, neue Session) — chakotay: Resume nach Session-Pause. S1-S3 alle QS-grün, S4 wartet seit Pause (`5763028`). Admin-„ja" auf S4-Routing-Frage. Plan-Briefing 2c bleibt aktiv (Default-Modus + Auto-Continuation), keine S4-spezifischen Auto-Stops im Plan. S4 routet an belanna mit Crash-Inspector-Tab + Fingerprint-Gruppierung + Stacktrace-Detail-View. `/crashes`-Endpoint + `CrashesBySession`-Store-Method aus P2b-S6 sind Bestand. Folge-Hinweis aus S3: realistisches Crash-Pattern für E2E-Smoke verwenden.
 
 ---
 
