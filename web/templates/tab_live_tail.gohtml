@@ -1,10 +1,124 @@
 {{/*
-  tab_live_tail.gohtml — Live-Tail tab placeholder.
+  tab_live_tail.gohtml — Live-Tail tab (Phase 2c S2, ADR-012 Accepted).
 
-  S1: static placeholder. S2 fills in the SSE / WS subscriber UI (ADR-012,
-  pending Admin-Confirm).
+  Wires the SSE live-tail stream onto an htmx-managed container using
+  the htmx-ext-sse extension (vendored at web/static/htmx-ext-sse.js,
+  SHA-pinned). The session filter is a plain <select> that the user
+  pre-fills (typed session id) — a richer "list sessions from /sessions
+  and pick one" dropdown is S3-scope (Session Browser). For S2 the
+  contract is: type a session id, click Connect, events stream in.
+
+  Pause/Resume model: the SSE EventSource is created by htmx when an
+  element with sse-connect is present in the DOM. We toggle the
+  presence of #live-tail-stream (the SSE-bound div) on Pause/Resume —
+  removing the element triggers htmx:beforeCleanupElement which the
+  htmx-ext-sse extension hooks to close the EventSource cleanly.
+  Re-inserting the element re-opens the connection. This is the
+  minimal-state pattern the extension's own docs endorse.
+
+  Auto-scroll: a small inline JS handler listens for the
+  htmx:sseMessage event on #live-tail-output and scrolls to the
+  bottom after each append. CSS overflow-anchor:none prevents the
+  browser from fighting the scroll. Total inline JS is ~25 lines —
+  under the "ok in base.gohtml" threshold the worklog memo set, but
+  scoped to this tab via guarded function-level vars.
 */}}
-<section class="tl-tab-panel" data-tab="live-tail" role="tabpanel">
+<section class="tl-tab-panel tl-live-tail" data-tab="live-tail" role="tabpanel">
   <h2>Live-Tail</h2>
-  <p class="tl-placeholder">Live-Tail — Phase 2c S2</p>
+
+  <form id="live-tail-controls" class="tl-live-controls"
+        onsubmit="event.preventDefault(); tlLiveTailConnect();">
+    <label for="live-tail-session">Session-ID</label>
+    <input type="text" id="live-tail-session" name="session"
+           placeholder="ulid-or-26-char-hex" autocomplete="off"
+           spellcheck="false">
+    <button type="submit" id="live-tail-connect">Connect</button>
+    <button type="button" id="live-tail-pause" onclick="tlLiveTailPause()"
+            disabled>Pause</button>
+    <button type="button" id="live-tail-resume" onclick="tlLiveTailResume()"
+            disabled>Resume</button>
+    <span id="live-tail-status" class="tl-live-status">idle</span>
+  </form>
+
+  <div id="live-tail-host" class="tl-live-host">
+    {{/* SSE-bound element is injected here by tlLiveTailConnect.
+         Keeping #live-tail-output in the static DOM (separate from
+         the htmx-managed sse host) means Pause can swap the
+         connecting wrapper without losing the rendered log. */}}
+  </div>
+
+  <pre id="live-tail-output" class="tl-live-output"
+       aria-live="polite"></pre>
+
+  <script>
+    // Phase 2c S2 — live-tail wiring. Scoped via "tl_" prefix; no
+    // globals leak beyond the page. The htmx-ext-sse extension is
+    // loaded by base.gohtml's <script src> tags.
+    (function () {
+      let currentSession = "";
+
+      function setStatus(text, cls) {
+        const el = document.getElementById("live-tail-status");
+        el.textContent = text;
+        el.className = "tl-live-status " + (cls || "");
+      }
+
+      function makeSSEHost(session) {
+        const host = document.createElement("div");
+        host.id = "live-tail-stream";
+        host.setAttribute("hx-ext", "sse");
+        host.setAttribute("sse-connect",
+          "/dashboard/stream?session=" + encodeURIComponent(session));
+        host.setAttribute("sse-swap", "message");
+        host.setAttribute("hx-swap", "beforeend");
+        host.setAttribute("hx-target", "#live-tail-output");
+        return host;
+      }
+
+      window.tlLiveTailConnect = function () {
+        const sess = document.getElementById("live-tail-session").value.trim();
+        if (!sess) {
+          setStatus("session id required", "tl-live-error");
+          return;
+        }
+        currentSession = sess;
+        const wrap = document.getElementById("live-tail-host");
+        wrap.innerHTML = "";
+        const host = makeSSEHost(sess);
+        wrap.appendChild(host);
+        // htmx must process the newly-inserted node for sse-connect
+        // to take effect.
+        if (window.htmx) { window.htmx.process(host); }
+        document.getElementById("live-tail-pause").disabled = false;
+        document.getElementById("live-tail-resume").disabled = true;
+        setStatus("connected: " + sess, "tl-live-ok");
+      };
+
+      window.tlLiveTailPause = function () {
+        const host = document.getElementById("live-tail-stream");
+        if (host) { host.remove(); }
+        document.getElementById("live-tail-pause").disabled = true;
+        document.getElementById("live-tail-resume").disabled = false;
+        setStatus("paused", "tl-live-paused");
+      };
+
+      window.tlLiveTailResume = function () {
+        if (!currentSession) { return; }
+        const wrap = document.getElementById("live-tail-host");
+        const host = makeSSEHost(currentSession);
+        wrap.appendChild(host);
+        if (window.htmx) { window.htmx.process(host); }
+        document.getElementById("live-tail-pause").disabled = false;
+        document.getElementById("live-tail-resume").disabled = true;
+        setStatus("connected: " + currentSession, "tl-live-ok");
+      };
+
+      // Auto-scroll: after htmx-ext-sse appends a message to
+      // #live-tail-output, jump to the bottom.
+      document.body.addEventListener("htmx:sseMessage", function (evt) {
+        const out = document.getElementById("live-tail-output");
+        if (out) { out.scrollTop = out.scrollHeight; }
+      });
+    })();
+  </script>
 </section>

@@ -111,16 +111,24 @@ func New(st *store.Store, cfg Config) http.Handler {
 	// /healthz is intentionally outside the auth group.
 	r.Get("/healthz", h.healthz)
 
-	// /dashboard* — Phase 2c S1 (ADR-011). Registered outside the bearer
-	// group; see the Dashboard field doc on Config for the auth-posture
-	// rationale and the follow-up ADR pointer. Three routes:
+	// /dashboard* — Phase 2c S1/S2 (ADR-011 + ADR-012). Registered
+	// outside the bearer group; see the Dashboard field doc on Config
+	// for the auth-posture rationale (permanently Loopback-only).
+	// Four routes:
 	//   GET /dashboard               — full layout (HTML)
 	//   GET /dashboard/tab/{slug}    — single tab body for htmx swap
 	//   GET /dashboard/static/*      — embedded JS / CSS
+	//   GET /dashboard/stream        — SSE live-tail (S2, ADR-012);
+	//                                  registered only when cfg.Hub
+	//                                  is non-nil, mirroring the /tail
+	//                                  WS posture.
 	if cfg.Dashboard != nil {
 		r.Get("/dashboard", cfg.Dashboard.LayoutHandler)
 		r.Get("/dashboard/tab/*", cfg.Dashboard.TabHandler)
 		r.Get("/dashboard/static/*", cfg.Dashboard.StaticHandler)
+		if cfg.Hub != nil {
+			r.Get("/dashboard/stream", cfg.Dashboard.StreamHandler(cfg.Hub))
+		}
 	}
 
 	// /tail is auth-protected (registered in the pr group below) but must

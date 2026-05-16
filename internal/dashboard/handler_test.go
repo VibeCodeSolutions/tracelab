@@ -64,8 +64,8 @@ func TestLayoutHandler_RendersAllTabsAndDefaultBody(t *testing.T) {
 		}
 	}
 	// Default tab is live-tail; its placeholder body must be rendered.
-	if !strings.Contains(bodyStr, "Live-Tail — Phase 2c S2") {
-		t.Errorf("default body missing live-tail placeholder")
+	if !strings.Contains(bodyStr, `id="live-tail-output"`) {
+		t.Errorf("default body missing live-tail SSE output target")
 	}
 	// Active class must mark the live-tail anchor.
 	if !strings.Contains(bodyStr, `data-tab="live-tail"`) ||
@@ -97,7 +97,7 @@ func TestLayoutHandler_SelectActiveTabViaQuery(t *testing.T) {
 		slug        string
 		wantBodyHas string
 	}{
-		{"live-tail", "Live-Tail — Phase 2c S2"},
+		{"live-tail", `id="live-tail-output"`},
 		{"sessions", "Sessions — Phase 2c S3"},
 		{"crashes", "Crashes — Phase 2c S4"},
 		{"agents", "Agents — Phase 2d (coming soon)"},
@@ -138,7 +138,7 @@ func TestLayoutHandler_UnknownTabFallsBackToDefault(t *testing.T) {
 		t.Fatalf("status=%d, want 200 (silent fallback)", resp.StatusCode)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), "Live-Tail — Phase 2c S2") {
+	if !strings.Contains(string(b), `id="live-tail-output"`) {
 		t.Errorf("fallback should render default live-tail body")
 	}
 }
@@ -154,7 +154,7 @@ func TestTabHandler_RendersBodyWithoutLayout(t *testing.T) {
 		slug        string
 		wantBodyHas string
 	}{
-		{"live-tail", "Live-Tail — Phase 2c S2"},
+		{"live-tail", `id="live-tail-output"`},
 		{"sessions", "Sessions — Phase 2c S3"},
 		{"crashes", "Crashes — Phase 2c S4"},
 		{"agents", "Agents — Phase 2d (coming soon)"},
