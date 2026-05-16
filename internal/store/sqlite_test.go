@@ -295,6 +295,55 @@ func TestUpsertCrashRejectsEmptyFingerprint(t *testing.T) {
 	}
 }
 
+// TestUniqueIndexEnforcedAtSQLLayer pins the Defense-in-Depth
+// behaviour of migration 0002: even if a future refactor to UpsertCrash
+// were to slip a raw INSERT past the SELECT-or-bump tx-guard, the
+// UNIQUE(session_id, fingerprint) index would still reject the second
+// row at the SQL layer. This test reaches into s.db directly to bypass
+// the Go-side dedup logic and verify the constraint really is wired up
+// at the schema level — without it, the index existence check in
+// TestOpenAndMigrate could pass while the index was, say, defined as
+// a regular (non-UNIQUE) index by mistake.
+func TestUniqueIndexEnforcedAtSQLLayer(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateSession(ctx, "unique-idx-probe")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// First raw INSERT must succeed.
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO crashes(session_id, ts, fingerprint, stacktrace, count) VALUES (?, ?, ?, ?, 1)`,
+		id, time.Unix(1700000000, 0).UTC(), "fp-defense", "trace one",
+	)
+	if err != nil {
+		t.Fatalf("first raw INSERT: %v", err)
+	}
+
+	// Second raw INSERT with the same (session_id, fingerprint) MUST
+	// be rejected by the UNIQUE index. We don't care about the exact
+	// driver error string — only that some error surfaced.
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO crashes(session_id, ts, fingerprint, stacktrace, count) VALUES (?, ?, ?, ?, 1)`,
+		id, time.Unix(1700000001, 0).UTC(), "fp-defense", "trace two",
+	)
+	if err == nil {
+		t.Fatal("second raw INSERT with same (session_id, fingerprint) must violate UNIQUE index, got nil error")
+	}
+
+	// Sanity-check: a different fingerprint in the same session is
+	// still allowed (the index is composite, not single-column).
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO crashes(session_id, ts, fingerprint, stacktrace, count) VALUES (?, ?, ?, ?, 1)`,
+		id, time.Unix(1700000002, 0).UTC(), "fp-defense-other", "trace three",
+	)
+	if err != nil {
+		t.Fatalf("distinct-fingerprint INSERT should succeed: %v", err)
+	}
+}
+
 func TestInsertEventsRejectsUnknownSession(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
