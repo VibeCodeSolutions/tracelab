@@ -865,7 +865,303 @@ byte-identically on `/ingest`, `/tail`, `/sessions`, `/events`,
 a pre-S6 hub gets a 404 on `/crashes` calls — captured cleanly by the
 existing `*HTTPError` non-2xx surface.
 
-## Phase 2c — Dashboard (placeholder)
+## Phase 2c — Dashboard
 
-ADR pending — **scope and stack to be discussed with Admin before start**
-(per plan-briefing 2026-05-13). No defaults set in advance.
+Plan: `~/.claude/plans/tracelab-phase-2c-dashboard.md`. Scope confirmed
+2026-05-16 (Admin „y" on Stack `htmx + html/template + SSE-or-WS`,
+embedded in `tracelab-hub` as `/dashboard` route, 5 sub-sprints S1–S5).
+
+#### ADR-011: Dashboard render stack and embedding (Admin-confirmed 2026-05-16 via #025 briefing)
+
+> **Status:** Accepted (Admin-confirmed 2026-05-16, plan-briefing for
+> Phase 2c sub-sprint S1). This ADR is the foundation layer for all
+> subsequent dashboard work (S2 live-tail, S3 sessions browser, S4 crash
+> inspector, S5 polish + agents-tab stub). No existing endpoint is
+> touched; the dashboard is purely additive surface (`GET /dashboard*`).
+
+The Tracelab hub is a Go daemon with a small HTTP API and a WS-based
+live-tail. Phase 2c adds a browser-facing dashboard on top of it. ADR-011
+fixes the rendering stack, the host binary, and the package layout — the
+three choices that constrain every subsequent dashboard sub-sprint.
+
+##### Decision 1 — Render stack = `htmx` + `html/template`
+
+Server-rendered HTML via the stdlib `html/template` package, with
+`htmx` (1.9.x line, local-vendored — see Decision 3) driving partial
+swaps for tab navigation and the live-tail stream. No client-side JS
+framework. No build step beyond `go build`.
+
+**Why:**
+- The dashboard is a server-driven inspection UI, not an offline-capable
+  SPA. `htmx` handles the interactive bits (tab swaps, live-stream
+  append, form submits) with HTML attributes — fits a server-rendering
+  model natively.
+- `html/template` is stdlib: zero new dependency, context-aware escape,
+  composable via `{{template "name" .}}`. Parsed once at handler init
+  (`template.ParseFS` over the embedded `go:embed` FS), shared across
+  requests.
+- The repo is CGO-free and ships as a single binary. Adding a Node-
+  based bundler (esbuild, webpack, vite) would fork the build pipeline,
+  break the "one `go build` → one binary" story, and force every
+  contributor to install a JS toolchain — an immediate violation of the
+  Phase-1 stack-marker.
+
+**Considered & rejected:**
+- `a-h/templ` (type-safe templates with Go generics) — Considered for
+  the compile-time field checks and the IDE story. Rejected because it
+  adds a code-generation step (`templ generate`) before every `go
+  build`, splitting the build pipeline. For an MVP dashboard with a
+  handful of templates, `html/template` reaches feature parity at
+  zero generator-tooling cost.
+- Vue / Svelte / React SPA with REST/JSON backend — Considered for the
+  richer interactivity story (charts, virtual scrolling). Rejected on
+  three counts: (i) introduces Node toolchain into a CGO-free Go repo,
+  (ii) forces a doubled build pipeline (one for Go binary, one for
+  static assets), (iii) Cross-Compile story degrades — Windows
+  contributors would need both Go and Node working. The MVP scope
+  (live-tail, session table, crash list) does not require an SPA.
+
+##### Decision 2 — Host = embedded in `tracelab-hub` as `/dashboard` route
+
+The dashboard runs inside the existing `tracelab-hub` binary, registered
+as a sub-router on the chi router built by `internal/http.New`. No
+separate `tracelab-dashboard` binary, no second daemon process.
+
+**Why:**
+- The dashboard reads the same SQLite store the hub already owns. A
+  second daemon would need either its own DB connection (multi-writer
+  contention) or an HTTP read-through to the hub (extra hop, extra
+  latency, doubled auth surface).
+- Live-tail is a direct `ws.Hub` subscriber today (`internal/ws.Hub`).
+  Embedding the dashboard inside the hub keeps that fan-out in-process;
+  a separate dashboard daemon would have to re-subscribe over WS,
+  buying nothing but extra moving parts.
+- Operationally, one daemon means one config file (`tracelab.toml`),
+  one auth token, one systemd unit, one Windows-service entry. The
+  Phase-1 single-binary lifecycle stays intact.
+
+**Considered & rejected:**
+- Separate `cmd/dashboard` binary speaking HTTP to the hub — Considered
+  for the cleaner separation-of-concerns (read-only consumer). Rejected
+  because it doubles the daemon-lifecycle surface (two `signal.NotifyContext`
+  shutdown sequences, two `/healthz` endpoints to monitor), adds an
+  internal HTTP hop for every dashboard page render, and would force a
+  second instance of the bearer-token discovery (config file? env var?
+  pipe from the hub?). For a single-user dev tool with a single SQLite
+  backing store, the separation is not paying for itself.
+
+##### Decision 3 — Asset embedding via `//go:embed`
+
+Templates and static assets (htmx.min.js, dashboard.css) ship inside the
+`tracelab-hub` binary via `//go:embed`. The `web/` top-level package
+exposes the embed.FS objects; `internal/dashboard` parses them at init
+time and serves them from in-memory.
+
+**Why:**
+- The single-binary distribution model that Phase 1 established
+  (`tracelab-hub` on Linux, `tracelab-hub.exe` on Windows, both
+  produced by `go build` without any external resource directory) must
+  survive Phase 2c. `//go:embed` is the stdlib mechanism for exactly
+  this case.
+- htmx is distributed as a single ~14kB minified JS file. Vendoring it
+  (i.e. committing it under `web/static/`) means contributors get a
+  reproducible build offline, no CDN fetch at runtime, no CSP
+  exemption for third-party origins, no privacy leak to a CDN provider.
+- `template.ParseFS(embedFS, "templates/*.gohtml")` is the documented
+  stdlib pattern — no third-party wrapper needed.
+
+**Considered & rejected:**
+- Loose-file serving from a `--web-root` flag — Considered for the
+  "edit a template, reload the page, no rebuild" dev workflow.
+  Rejected because it forks the distribution into "binary + files
+  directory", breaks single-binary install, and creates two failure
+  modes ("did the binary find the templates? did the files directory
+  ship?"). For dev-time iteration the standard Go workflow (`go run
+  ./cmd/hub`, edit, re-run) is adequate given how small the templates
+  are.
+- CDN-hosted htmx — Considered for the smaller binary size (~14 kB
+  saved). Rejected for offline-build reproducibility, privacy
+  (every dashboard render would beacon to a third-party CDN), and
+  Content-Security-Policy hygiene — the dashboard should not require a
+  `script-src` exemption for a third-party origin.
+
+##### Decision 4 — Package layout: new top-level `web/`, handlers in `internal/dashboard/`
+
+A new top-level `web/` package owns the templates and static assets, and
+declares the `//go:embed` filesystems. A new internal package
+`internal/dashboard/` owns the HTTP handlers (layout render, tab render,
+static serve). The route registration sits inside the existing
+`internal/http.New` constructor, in a new sub-group analogous to the
+existing bearer-30s group.
+
+```
+tracelab/
+├── web/                          ← new top-level (assets only, no Go logic)
+│   ├── embed.go                  ← //go:embed declarations + exported FS handles
+│   ├── templates/
+│   │   ├── base.gohtml           ← layout: <head>, header, tab-nav, content slot, footer
+│   │   ├── tab_live_tail.gohtml  ← S1 placeholder (S2 fills in)
+│   │   ├── tab_sessions.gohtml   ← S1 placeholder (S3 fills in)
+│   │   ├── tab_crashes.gohtml    ← S1 placeholder (S4 fills in)
+│   │   └── tab_agents.gohtml     ← S1 placeholder, "Phase 2d coming soon"
+│   └── static/
+│       ├── htmx.min.js           ← vendored, version pinned in file comment
+│       └── dashboard.css         ← minimal layout/typography
+├── internal/dashboard/           ← new internal package (Go logic only)
+│   ├── handler.go                ← Handler type, LayoutHandler, TabHandler, StaticHandler
+│   └── handler_test.go
+└── internal/http/server.go       ← adds `/dashboard*` sub-router wiring
+```
+
+**Why this split:**
+- `web/` as a top-level package is the conventional Go location for
+  embedded UI assets (`grafana/grafana`, `pocketbase/pocketbase`,
+  `kubernetes/dashboard` all follow this pattern). It signals "this
+  directory is not Go business logic, it's the UI artefact tree" — the
+  embed.FS objects exported from `web/embed.go` are the public surface.
+- `internal/dashboard/` as the handler package keeps the HTTP-layer
+  Go code on the same side of the `internal/` boundary as the rest of
+  the daemon's request-handling logic. Handlers depend on the `web`
+  package for the embedded FS, never the other way round.
+- Sub-router registration in `internal/http/server.go` mirrors the
+  existing bearer-30s group and the `/adb/*` registration pattern from
+  ADR-004 Option B — the operator's mental model ("`/dashboard*` is
+  registered in the same constructor as everything else") stays
+  uniform.
+
+**Considered & rejected:**
+- Templates and handlers in one package (`internal/dashboard/templates/*`
+  inline-embedded) — Rejected because it conflates the "asset tree"
+  and the "Go logic tree" inside a single internal package. The
+  current split makes "which files do designers/UI contributors
+  touch?" obvious: `web/`. Go contributors touch `internal/dashboard/`.
+- Templates under `internal/dashboard/templates/` (no top-level `web/`)
+  — Rejected because the static assets (htmx, CSS) are not "internal
+  to the dashboard package" semantically; they're the binary's user-
+  facing artefact tree. Top-level `web/` is the idiomatic home.
+
+##### Consequences
+
+- **Single build pipeline preserved.** `go build ./cmd/hub` still
+  produces a self-contained binary. No Node toolchain. CGO stays off
+  (the `web/` package is pure-Go: `//go:embed` declarations only, no C
+  bindings). Cross-Compile via `make hub-windows` keeps working
+  byte-identically.
+- **One new top-level directory `web/`.** First non-`cmd`/non-`internal`
+  Go-level addition since Phase 1. Documented in this ADR and in
+  `README.md`'s component list (M-followup if not in S1 trivial-touch).
+- **htmx version is pinned at vendor time.** A bump means a new commit
+  touching `web/static/htmx.min.js` plus a verification smoke. No
+  silent upgrades. Version comment in the file documents the source URL
+  and the SHA256.
+- **Auth posture deferred.** ADR-011 does not decide how `/dashboard`
+  is authenticated; Decision 2 just registers it as a sub-router. The
+  Phase-1 bearer-header model does not work for browsers (no API to
+  attach `Authorization` to a `<script src=…>` load), so an auth
+  strategy (bearer-via-cookie, dashboard-session-token, or
+  local-loopback-only) needs its own ADR — proposed as an S1 follow-up
+  / S2 prerequisite, not bundled into ADR-011.
+
+#### ADR-012: Dashboard live-tail mechanism — SSE vs. WS-reuse (PROPOSED, awaiting Admin-Confirm via Chakotay)
+
+> **Status:** Proposed. Decision block intentionally left blank. The
+> Phase-2c plan (Admin-confirmed 2026-05-16) flags the live-tail
+> mechanism as an explicit Auto-Stop trigger — Belanna routes Ballard's
+> trade-off analysis to Chakotay, who collects Admin's confirmation
+> before S2 (live-tail implementation) starts.
+
+S1 (this sub-sprint) lays the dashboard foundation but does **not**
+implement live-tail. S2 picks one of the two options below and wires it
+into `tab_live_tail.gohtml`. This ADR exists to make the trade-off
+explicit and to capture Ballard's lead recommendation for Admin's
+decision.
+
+##### Context
+
+The hub already broadcasts live events through `internal/ws.Hub`:
+`/ingest` and the adb bridge publish, `/tail` is a `gorilla/websocket`
+endpoint that fan-outs to subscribers with optional `?session=<id>`
+filter. The dashboard's live-tail tab needs to surface the same
+stream inside the browser, with append-on-arrival rendering and a
+session-filter dropdown (Phase 2c S2 DoD).
+
+##### Options
+
+**Option A — Server-Sent Events on a new `/dashboard/stream` endpoint.**
+A new HTTP handler under `/dashboard/stream?session=<id>` opens an SSE
+connection. Internally, the handler subscribes to the same `ws.Hub` the
+existing `/tail` uses and pipes events as `data: <json>\n\n` frames. htmx
+has built-in SSE support (`hx-ext="sse"`, `sse-connect`, `sse-swap`) —
+the template binds the event stream to an append-target with one
+attribute.
+
+**Option B — WebSocket reuse via the existing `/tail` endpoint.**
+The dashboard JS opens a `WebSocket("ws://…/tail?session=<id>")` directly
+from the browser. A small (~30 line) inline script appends each incoming
+message to the live-tail container. No new server endpoint; the existing
+`/tail` Hub-subscriber infrastructure is reused as-is.
+
+##### Trade-off table
+
+| Criterion | Option A — SSE on new endpoint | Option B — WS reuse of `/tail` |
+|---|---|---|
+| **Bearer auth from browser** | Trivial: SSE is a normal HTTP GET, the cookie/header model from ADR-011-followup applies directly. `EventSource` API can carry cookies. | Hard: browsers cannot set `Authorization:` headers on `WebSocket(…)` constructors. Requires either bearer-in-query-string (`/tail?token=…`, currently rejected by the hub per README) or a cookie-based auth wrap. Forces an auth-model change before S2 can ship. |
+| **Reconnect behaviour** | Browser-built-in: `EventSource` auto-reconnects with backoff. Server can emit `id:` and clients resume via `Last-Event-ID`. | Manual: dashboard JS must implement `onclose`-driven reconnect loop. ~20 extra lines of inline JS, easy to get wrong (exponential backoff, jitter). |
+| **Code reuse from existing hub** | Medium: needs a new handler that bridges `ws.Hub` subscriber → `http.ResponseWriter` flush loop. Maybe 60–80 lines of new Go, but conceptually a thin shim. | High: zero new server code — reuses `ws.Handler(cfg.Hub, logger)` as-is. The Hub already does slow-subscriber drop, heartbeat ping/pong, graceful close on shutdown. |
+| **Browser support** | Universal (EventSource ≥ IE10-equivalent). htmx `hx-ext="sse"` extension is standard. | Universal (WebSocket support has been universal since ≥ 2013). |
+| **Stream direction** | One-way server→client (matches live-tail use case exactly). | Bidirectional (which we don't need; the browser never sends back). |
+| **Backpressure / slow subscriber** | Must be implemented in the new bridge handler: when the SSE writer's flush blocks, drop or close. Mirrors the existing `ws.Hub` slow-subscriber-drop. | Already implemented in `ws.Hub` (per Phase-1 ADR-implicit decision): slow subscribers get their channel closed; the publish path never stalls. Free for the dashboard. |
+| **Protocol overhead** | `text/event-stream` + JSON payloads. Slightly more bytes than raw WS frames (the `data:` prefix and double-newline framing). Negligible at the volumes Tracelab handles. | Binary or text WS frames. Marginally more efficient. |
+| **Server-side cost** | One additional handler + one additional Hub-subscriber goroutine per dashboard tab. Same lifecycle pattern as `/tail`. | Zero additional handler. One additional Hub-subscriber goroutine per dashboard tab (same as Option A — both subscribe to the Hub). |
+| **htmx integration** | First-class: `<div hx-ext="sse" sse-connect="/dashboard/stream?session=…" sse-swap="message" hx-swap="beforeend">`. ~3 attributes, zero JS. | Requires custom inline JS to bridge `WebSocket.onmessage` → DOM append. Not htmx-idiomatic. |
+| **Operational debuggability** | `curl -N http://…/dashboard/stream?session=…` works for smoke. Browser DevTools "Network → EventStream" tab shows frames. | `websocat ws://…/tail?session=…` works for smoke. Browser DevTools "Network → WS" tab shows frames. |
+
+##### Ballard's recommendation: **Option A (SSE on new `/dashboard/stream`)**
+
+**Why:**
+1. The auth story collapses. SSE rides on plain HTTP, which means the
+   forthcoming dashboard auth model (bearer-via-cookie or short-lived
+   session-token cookie) covers `/dashboard/stream` with the same
+   middleware that covers `/dashboard` itself. Option B forces a
+   second auth path (query-string token, against the README's explicit
+   "no token in query string" rule, or a cookie-wrap layer that has to
+   also cover the existing `/tail` for backwards-compat).
+2. The dashboard JS shrinks to zero. Option A is `<div hx-ext="sse"
+   sse-connect=…>`, three htmx attributes. Option B is ~30 lines of
+   inline reconnect/append logic — bigger surface to maintain, easier
+   to regress.
+3. Live-tail is intrinsically one-way (server → browser). SSE is the
+   stdlib match; WebSocket's bidirectional capability is overhead we
+   don't use.
+4. Reconnect-on-network-blip is free with SSE (the browser does it).
+   The existing `/tail` endpoint is consumed today by `tracelab tail`
+   (CLI) and by future MCP tools — adding a reconnect-loop JS
+   subscriber to it changes the consumer expectations subtly. SSE on a
+   new endpoint keeps `/tail` as the unchanged "raw fan-out" surface.
+5. The new-handler cost is 60–80 lines of Go that mirror the `ws.Hub`
+   subscriber pattern already proven in `internal/ws/handler.go`. Not
+   free, but bounded.
+
+**Counter-weight:** Option B is genuinely lighter on server code in S2
+itself (zero new lines). The trade is "save 60 lines of Go in S2 vs.
+keep both auth paths and inline-JS-reconnect forever." The recommendation
+takes the long-term-maintenance trade.
+
+##### Decision
+
+*(intentionally blank — awaits Admin-Confirm via Chakotay; Belanna will
+route Ballard's recommendation upstream)*
+
+##### Considered & rejected (regardless of A/B)
+
+- **Polling `/events?since_seq=` from the dashboard.** Considered for
+  the "no streaming infrastructure at all" simplicity. Rejected
+  because the polling cadence has to be tight (≤ 500 ms) for live-tail
+  to feel live; that's worse load on the hub than one persistent
+  subscriber, and the user-experience still lags by half the poll
+  interval. The hub already broadcasts in real time via `ws.Hub` —
+  refusing to consume that for dashboard tail would leave performance
+  on the table.
+- **gRPC-Web streaming.** Considered for completeness. Rejected
+  because the repo has no gRPC surface today; introducing it for one
+  dashboard endpoint is a stack expansion with no other consumer.
