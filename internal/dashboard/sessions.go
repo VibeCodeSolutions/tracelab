@@ -188,12 +188,30 @@ func (h *Handler) SessionsHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Unknown session id → 404 (not a silent fallback): the user clicked
 // a stale link or hand-typed a bad id; we want that to fail loud.
+//
+// Defence-in-depth posture (mirrors CrashDetailHandler, S5 backport):
+//
+//  1. chi's wildcard route strips the prefix; we re-strip in case the
+//     handler is wired through a non-chi mux (the test env uses
+//     net/http's mux, which leaves the prefix on r.URL.Path).
+//  2. Empty / embedded-slash reject — fails loud on a stale link or a
+//     hand-typed path like "/dashboard/tab/sessions/foo/bar".
+//  3. ID-format reject — only [A-Za-z0-9_-] (single-segment) is
+//     accepted. The current store id is 26 lowercase hex chars, but
+//     the charset is intentionally wider so a future migration to a
+//     ULID / KSUID / NanoID variant doesn't have to touch this
+//     handler. The negative space — path-traversal ".." / slashes /
+//     whitespace / control chars — is what we actually defend
+//     against.
+//  4. Store-layer lookup forwards sql.ErrNoRows → 404 for the
+//     "id is well-formed but unknown" case.
 func (h *Handler) SessionDetailHandler(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/dashboard/tab/sessions/")
-	// Defence-in-depth: chi's wildcard route already strips the
-	// leading prefix, but we re-check the trailing-slash and any
-	// embedded slash to avoid surprises (e.g. "/dashboard/tab/sessions/foo/bar").
 	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if !isValidSessionIDFormat(id) {
 		http.NotFound(w, r)
 		return
 	}
@@ -489,4 +507,34 @@ func formatHumanTime(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format("2006-01-02 15:04:05Z")
+}
+
+// isValidSessionIDFormat is the third layer of SessionDetailHandler's
+// defence-in-depth check (S5 backport). Accepts only single-segment
+// ids matching [A-Za-z0-9_-]. The accepted set is deliberately wider
+// than the current 26-char-lowercase-hex format produced by the store
+// so a future id-scheme migration (ULID / KSUID / NanoID) doesn't
+// require touching this handler. The values that fall outside the
+// charset are the ones we care about rejecting: ".." (path traversal),
+// "/" (already caught upstream but defended in depth), whitespace,
+// control characters, and shell-meta-y characters that don't belong in
+// a path segment. Length is bounded so a 4 MB curl-injection can't
+// blow up the regex / scan work; 128 mirrors the filter-cap in
+// parseSessionsParams.
+func isValidSessionIDFormat(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c == '_' || c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

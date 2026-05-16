@@ -366,6 +366,49 @@ func TestSessionDetailBackURLPreservesQuery(t *testing.T) {
 	}
 }
 
+// TestSessionDetailDefenseInDepth — S5 backport of the S4-style
+// triple-layer check on SessionDetailHandler. Covers the three reject
+// surfaces ahead of the store lookup: empty id (treated as the bare
+// "/dashboard/tab/sessions/" listing prefix), embedded slash (rejected
+// before any store touch — net/http's mux would otherwise route
+// "/dashboard/tab/sessions/foo/bar" into this handler with id="foo/bar"),
+// and bad-charset ids (path traversal, whitespace, shell metas).
+//
+// All three must 404 without ever reaching the store. The pre-existing
+// "unknown but well-formed id" test (TestSessionDetailUnknownID404)
+// covers the fourth layer (sql.ErrNoRows → 404).
+func TestSessionDetailDefenseInDepth(t *testing.T) {
+	env := newSessionsTestEnv(t)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		// Empty id — the bare prefix lands on the wildcard handler in
+		// the test mux. SessionDetailHandler must 404 it rather than
+		// trying to look up "".
+		{"empty_id", "/dashboard/tab/sessions/"},
+		// Embedded slash — net/http's mux passes the suffix through
+		// verbatim, so the handler sees id="foo/bar". The layer-2 check
+		// rejects it before any store touch.
+		{"embedded_slash", "/dashboard/tab/sessions/foo/bar"},
+		// Bad charset — characters outside [A-Za-z0-9_-]. Path
+		// traversal markers, whitespace, and shell-meta-style payloads
+		// must all be rejected at layer 3, not bounced from the store.
+		{"bad_format_dotdot", "/dashboard/tab/sessions/.."},
+		{"bad_format_space", "/dashboard/tab/sessions/has%20space"},
+		{"bad_format_pipe", "/dashboard/tab/sessions/foo%7Cbar"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _ := env.get(t, tc.path)
+			if code != http.StatusNotFound {
+				t.Fatalf("status=%d, want 404 for %s", code, tc.path)
+			}
+		})
+	}
+}
+
 // TestSessionsTabClampsPageBeyondLast — when the user requests a
 // page past the end (e.g. filter shrank the result set), the handler
 // snaps back to the last valid page rather than rendering an empty
