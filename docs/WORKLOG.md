@@ -1,14 +1,14 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2b-gemerged (FF-Merge feat/phase-2-mcp → main bei cb249bd, Branch lokal+remote gelöscht, Phase 2b vollständig closure)
-last-updated: 2026-05-15
+status: phase-2c-eroeffnet (S1 ARCH-Vorab + Skeleton + /dashboard-Route + Layout läuft; Stack htmx + html/template + SSE in hub-Binary via go:embed; Plan-Briefing 2c Admin-approved 2026-05-16)
+last-updated: 2026-05-16
 qs-letzter-lauf: qs-20260515-005
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
-aktiver-auftrag: "—"
+aktiver-auftrag: "#025 P2c-S1 ARCH-Vorab (ADR-011/012) + Skeleton + /dashboard-Route + Tab-Layout"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -23,6 +23,38 @@ aktiver-auftrag: "—"
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #025 — Tracelab P2c-S1 — ARCH-Vorab (ADR-011/012) + Skeleton + `/dashboard`-Route + Tab-Layout
+
+- **Timestamp:** 2026-05-16T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (Stack-Vorbesprechung am 2026-05-16 in Chakotay-Session: 2 Runden AskUserQuestion-Block-Dialog, Plan-Briefing 5a y'd) → Chakotay (Modus H2 Block-Dialog + Plan-File `~/.claude/plans/tracelab-phase-2c-dashboard.md` + Auto-Continuation-Default-Modus aktiv) → belanna
+- **Auftrag:** S1 von Phase 2c — **erster Sub-Sprint, Foundation-Layer**. ARCH-Vorab in `docs/ARCH.md` vor Code-Touch + Skeleton-Implementierung mit `/dashboard`-Route in `tracelab-hub` und Tab-Navigation-Layout (4 Tabs: Live-Tail · Sessions · Crashes · Agents-Placeholder).
+  - **Umbrella-Ref:** Phase 2c (5 Sub-Sprints S1–S5)
+  - **Plan-Ref:** `~/.claude/plans/tracelab-phase-2c-dashboard.md` (Sub-Sprint S1)
+  - **Stack-Entscheidungen (Admin-confirmed):** htmx + `html/template` + SSE-or-WS (genauer Live-Tail-Mechanik in ADR-012 zu entscheiden), embedded in `tracelab-hub` als `/dashboard`-Route, Assets via `go:embed`, CGO-frei bleibt, keine Node-Toolchain.
+  - **Branch:** `feat/phase-2-dashboard` von `main@bf69888` (neu zu erstellen)
+- **DoD S1:**
+  - **ADR-011 in `docs/ARCH.md` VOR Code-Touch** — Render-Stack + Embedding-Pfad. Decisions: (a) htmx + `html/template` als Render-Stack, (b) `tracelab-hub` als Host (`/dashboard`-Route, kein eigenes Binary), (c) `go:embed` für Templates + Static-Assets, (d) `web/`-Top-Level-Paket-Layout. Considered/Rejected: Templ, Vue/Svelte-SPA, separate `tracelab-dashboard`-Binary. Begründungen kurz aber konkret (CGO-frei-Constraint, eine Build-Pipeline, Cross-Compile-Story).
+  - **ADR-012 in `docs/ARCH.md` VOR S2-Start** — Live-Tail-Mechanik. Trade-off-Analyse: SSE auf `/dashboard/stream?session=…` vs. WS-Reuse von `/tail` direkt aus Browser. Entscheidung benötigt Admin-Confirm (Auto-Stop laut Plan-Briefing) — in S1 nur ADR-012-Skelett mit Optionen + Empfehlung, finaler Decision-Block nach Admin-Confirm.
+  - **`/dashboard`-Route** in `internal/http/server.go` (Sub-Router, ggf. eigene Auth-Strategie zu klären — Auto-Stop falls nicht trivial aus Bearer ableitbar).
+  - **`web/`-Paket-Layout:** `web/templates/*.gohtml` (Layout + Page-Templates für die 4 Tabs als leere Stubs), `web/static/` (htmx-Distribution + minimal CSS), `internal/dashboard/` für Handler.
+  - **Layout + Tab-Navigation rendert E2E** — `/dashboard` zeigt im Browser Layout-Frame mit 4 Tabs („Live-Tail" / „Sessions" / „Crashes" / „Agents — Phase 2d coming soon"), navigation funktioniert (htmx-swap auf Tab-Klick), Tab-Inhalte sind leer/Placeholder.
+  - **`go vet ./...` clean, `go test -race -count=1 ./...` repo-weit grün** — neue Tests für Dashboard-Handler (Layout-Render, Tab-Routing-Smoke, Static-Asset-Embed).
+- **Mandat:**
+  - Worker-Spawn ballard empfohlen (Klasse `feature`, neuer `web/`-Top-Level + ARCH-Vorab + `go:embed`-Setup = substantielle Foundation).
+  - **ADR-011 vor Code-Touch** (analog ADR-006/008 als Schreib-vor-Code-Pattern), ADR-012-Skelett mit klarer Trade-off-Tabelle für Admin-Confirm.
+  - **Cross-Check-Scope:** dies ist Greenfield-Foundation, neue Pakete (`web/`, `internal/dashboard/`). Cross-Check vs `main@bf69888`-Baseline: alle bestehenden Pakete (`cmd/{hub,cli,mcp}`, `internal/{adb,client,config,cliconfig,crash,http,ingest,store,ws}`) sollten 0 Lines bleiben **außer** `internal/http/server.go` (`/dashboard`-Sub-Router-Registrierung) und `cmd/hub/main.go` falls Wireup-Touch nötig.
+- **Auto-Stop S1:**
+  - **ADR-012-Entscheidung SSE-vs-WS-Reuse** — Admin-Confirm nach Belannas Trade-off-Analyse (Belanna soll konkrete Empfehlung im ADR-012-Entwurf hinterlegen, ich routet das an Admin).
+  - **Auth-Modell fürs Dashboard** — falls nicht trivial aus Bearer ableitbar (Cookie-Wrap), Stopp + Admin-Confirm.
+- **Nach S1-QS-grün:** S2 (Live-Tail) chained automatisch via Auto-Chain, **außer** ADR-012-Entscheidung blockt.
+- **Status:** offen (eröffnet)
+- **Verlauf:**
+  - 2026-05-16T (Eröffnung) — chakotay: Plan-Briefing 2c approved (Admin „y" auf Stack htmx+html/template+SSE in hub-Binary, Scope Live-Tail + Sessions + Crashes + Agents-Placeholder, Sub-Sprints S1–S5). S1 routet an belanna mit ARCH-Vorab-Mandat (ADR-011 vor Code-Touch, ADR-012-Skelett mit Trade-off-Tabelle). Default-Modus aktiv (Lead-Autonomie für trivial-Folge-Schritte). Phase-2d-Bookmark dokumentiert im Plan-File (KI-Agenten-Stack nach 2c, eigener H2-Dialog).
 
 ---
 
