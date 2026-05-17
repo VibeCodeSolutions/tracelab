@@ -1,16 +1,16 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-eröffnet — Phase-2-Tail gemerged (`563ec27`, 6 Commits live auf main), Phase 2d (KI-Agenten-Stack, 6 Sub-Sprints S0+S1-S5) eröffnet mit S0 ARCH-Vorab. Multi-Ingest-Architektur Admin-confirmed (SDK-Hooks + Transcript-Tail + MCP-Push). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt. Auto-Stop nach S0 für Schema-Approval.
+status: phase-2d-s0-qs-auflagen — Worker (`0759767`) + QS Tuvok (qs-20260517-002 auflagen/major) durch. 2 Findings: VC-031-BRANCH (Major, Cherry-Pick-Duplikat e05e43b von 47990de, FF-Merge bräche — Rebase mit Force-Push nötig) + VC-031-ADR-PROPOSED (Minor, ADR-013 Decision-Body-Form-Drift, T5-Promotion-Kandidat ADR-Konventionen) + 6 Plus-Befunde. Auto-Stop nach S0 für Schema-Approval gebündelt mit Findings-Klärung.
 last-updated: 2026-05-17
-qs-letzter-lauf: qs-20260517-001
+qs-letzter-lauf: qs-20260517-002
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#031 — Phase-2d-S0 ARCH-Vorab (Pipeline-Doku + Schema + ADR-013)"
+aktiver-auftrag: "#031 — Phase-2d-S0 QS-auflagen, wartet auf Admin-Confirm (Schema-Approval + Rebase + ADR-Form)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -56,6 +56,10 @@ aktiver-auftrag: "#031 — Phase-2d-S0 ARCH-Vorab (Pipeline-Doku + Schema + ADR-
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Phase-2d-Plan-Briefing (Blocks 1-3 in einem Schritt vorgelegt, alle Defaults aus Pre-Briefing + Phase-2a/b/c-Pattern getragen). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt. Routet S0 an belanna mit Auto-Stop-Pflicht nach S0 für Schema-Approval.
   - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse feature (Doku-Sprint kein Code), Worker-Spawn ballard für S0-ARCH-Vorab. Auto-Stop nach S0 für Schema-Approval (PFLICHT).
+  - 2026-05-17T (Worker-Done) — ballard: Commit `0759767` auf `feat/phase-2d-agents` (von main@563ec27, mit Cherry-Pick `e05e43b` für #031-Eröffnung). docs/ARCH.md +406 Lines (Sektion „Phase 2d — Agent-Ingest Layer" + ADR-013 Proposed mit befülltem Decision-Body „subject to Admin-Confirm"). migrations/0003_agents_schema.up.sql + .down.sql neu, an TOP-LEVEL `migrations/` statt embed-FS (Pragmatik wegen Briefing-Konflikt „nicht anwenden + go-test grün" — Plan-Hinweis im ARCH.md: S1 verschiebt Datei + bumpt Test-Counter). Compilier-Test voller Chain (0001+0002+0003) clean. Cross-Check-Scope 15× ungebrochen.
+  - 2026-05-17T (QS-Lauf gestartet) — tuvok: standard QS-Spawn für ARCH-Review + Schema-Sanity + ADR-Form-Check.
+  - 2026-05-17T (QS-auflagen) — tuvok, qs-20260517-002: Status `auflagen` / Schweregrad `major`. **🟡 VC-031-BRANCH (Major):** Cherry-Pick `e05e43b` ist Patch-ID-identischer Duplikat von `47990de` auf main (Branch wurde von `563ec27` statt `47990de` angelegt). FF-Merge bräche — Rebase nötig (`git rebase --onto 47990de e05e43b feat/phase-2d-agents`), Force-Push-pflichtig → Admin-Confirm. **🟢 VC-031-ADR-PROPOSED (Minor):** ADR-013 Decision-Body im Proposed-State befüllt mit Caveat statt strikt leer (Form-Drift vom ADR-007/009/012-Pattern). Pragmatisch korrekt, aber Methodik-Klärung in `30_Wissen/ADR-Konventionen.md` fällig (T5-Promotion-Kandidat seit qs-20260516-002). **6 Plus-Befunde** dokumentiert (Top-Level-Pfad-Pragmatik, Tripwire-Vererbung, Per-Source-Forensik, Schema-Stil-Konsistenz mit 0002, Live-Test bestätigt alle 7 Constraint-Pfade, Wire-Compat-Statement präzise).
+  - 2026-05-17T (Findings-Gate) — chakotay: Auflagen-Verdikt strategisch geprüft. **VC-031-BRANCH:** Freigabe als Admin-Confirm-Bündel (Rebase mit Force-Push hängt eh am Schema-Approval-Stop — eine Frage statt zwei). **VC-031-ADR-PROPOSED:** Methodik-Folge-Auftrag (T5-Promotion ADR-Konventionen.md), kein Re-QS für ADR-013 nötig — Konvention klären erlaubt beide Varianten oder schreibt strikt-leer formal fest. Auftrag wartet auf Admin-Confirm zu (1) Schema-Approval (2) Branch-Rebase-Force-Push (3) ADR-Form-Regel. WORKLOG-Sync `<dieser-commit>`.
 
 ---
 
