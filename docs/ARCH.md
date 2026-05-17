@@ -1469,6 +1469,111 @@ in the hub rejects unknown fields but accepts missing optional fields,
 so payload shape stays small per source while the schema underneath
 captures the union.
 
+### Transcript-Tail bridge (S2 implementation)
+
+The transcript-tail bridge is the second of three ingest sources, live
+since Phase 2d S2 (Auftrag #033). It lives in `internal/agents/transcript.go`
+alongside the SDK-hook handler from S1 — Option A (extend `internal/agents/`)
+over Option B (new `internal/transcript/`) so the bridge shares the
+`store.InsertAgent*` dispatch with the S1 handler. The chosen layout is
+documented inline at the top of `transcript.go`.
+
+#### Tail-pattern choice — polling over fsnotify
+
+`time.Ticker` polling at a 1 s default cycle. Rationale:
+
+- Stdlib only, no new dependency; keeps the CGO-free cross-compile
+  invariant intact (`modernc.org/sqlite` is the only "external" runtime,
+  and it is pure Go).
+- Claude-Code transcripts are append-only; we only ever care about new
+  bytes past the last consumed offset. fsnotify's strengths
+  (rename/delete/truncate edges) do not buy us anything here.
+- 1 s tail-cycle latency is fine for forensic-grade dashboards. The
+  live stream remains the Phase-2c S2 SSE path; the transcript-tail is
+  the slower-but-comprehensive backfill source.
+- fsnotify behaviour under heavily-appended files is per-platform
+  (inotify Linux, kqueue BSD, ReadDirectoryChangesW Windows) — adding
+  test surface for a sub-5 % latency win no human notices.
+
+Tunable via `cfg.Agents.Transcript.PollIntervalMs` (default 1000).
+
+#### Persistence choice — direct store call
+
+The bridge calls `store.InsertAgent*` directly rather than POSTing to
+its own `/agents/ingest`. We are inside the hub's address space —
+HTTP would force a JSON+auth round-trip per event with no behaviour
+win, and a bridge-side crash during an in-flight HTTP self-call would
+leak a half-persisted state. The S1 handler's `persist()` is itself a
+thin dispatcher over the same `Insert*` methods; calling them directly
+just skips the wire re-shape.
+
+#### Verified JSONL field mapping
+
+The Claude-Code transcript JSONL format is not publicly documented,
+so the S2 worker brief required pre-hardcoding verification by reading
+real transcripts under `~/.claude/projects/-home-kaik-Projekte-tracelab/*.jsonl`.
+The verified mapping below was empirically derived from those files
+(same anti-doppel-counting discipline that S1's WebFetch-against-hooks-doku
+step established):
+
+| JSONL field (where) | Maps to | Notes |
+|---|---|---|
+| top-level `sessionId` | (not persisted as FK) | Claude-Code conversation id, NOT a tracelab `sessions.id`; populating `agent_spawns.session_ref` from this would always FK-fail. Reserved for future cross-domain joins (S4-S5). |
+| top-level `cwd` | `agent_spawns.project` (via basename) | `/home/kaik/Projekte/tracelab` → `"tracelab"`. Empty cwd → `"unknown"` so the row still satisfies the project-required guard. |
+| top-level `timestamp` (RFC3339-Z) | `*.ts` (unix-nano) | Unparseable → line skipped silently. |
+| top-level `uuid` | (not persisted) | Per-message correlation id; only consumed by the bridge for log lines. |
+| top-level `agentId` (subagent streams only) | `agent_spawns.id` (via `padTo26`) | Subagent JSONL lives at `<session>/subagents/agent-<id>.jsonl`; the `agentId` top-level field is the 16-17-char hex id. Padded to 26 chars (ULID-shape) per the S1 convention. |
+| top-level `isSidechain: true` | bridge marker for subagent stream | Determines `ownerSkill = "subagent"` vs `"session"`. |
+| top-level `type` | bridge dispatch | `"assistant"` → token+spawn-begin emit; `"user"` with `toolUseResult` → verdict + spawn-end emit; everything else → no-op. |
+| `message.usage.input_tokens` | `agent_tokens.input_tokens` | Per-LLM-iteration delta, NOT cumulative. |
+| `message.usage.output_tokens` | `agent_tokens.output_tokens` | |
+| `message.usage.cache_creation_input_tokens` | `agent_tokens.cache_write` | Renamed in schema for brevity. |
+| `message.usage.cache_read_input_tokens` | `agent_tokens.cache_read` | |
+| `message.content[].type:"tool_use"` with `name:"Agent"\|"Task"\|"Skill"` | `agent_spawns` row (child) | Parent-side first sighting of a child spawn. `spawn_id` derived from `tool_use.id` (`stripNonHex` + `padTo26`); coalesced later when the subagent stream re-emits the same id via the subagent file. |
+| `tool_use.input.description` | `agent_spawns.skill` | Worker brief's "description" field is the closest human-readable label. |
+| top-level `toolUseResult.agentId` | `agent_spawns.id` (via `padTo26`) | Parent-side spawn-end marker for the just-finished subagent. |
+| top-level `toolUseResult.agentType` | `agent_spawns.skill` | E.g. `"general-purpose"`. |
+| top-level `toolUseResult.status` | `agent_verdicts.verdict` (via `mapToolResultStatusToVerdict`) | Mapping: `"completed"\|"success"` → `freigabe`, `"error"\|"failed"` → `rueckgabe`, `"escalated"\|"escalation"` → `eskalation`, anything else → `none`. Empty status → no verdict row. |
+| `toolUseResult.usage.*` | `agent_tokens` (summary row at spawn-end) | Aggregate totals (vs. per-message deltas above). Same `source="transcript"`, distinct `ts`, so coexists with per-message rows. |
+
+#### Idempotency with the SDK-hook source
+
+The `agent_tokens.UNIQUE(spawn_id, ts, source)` schema constraint
+(ADR-013 §Consequences §Per-source-forensic-breakdown) makes the
+transcript-tail bridge fully additive against S1's SDK-hook source.
+A spawn that both sources see is persisted as:
+
+- exactly ONE row in `agent_spawns` (collapsed on PK by INSERT OR
+  IGNORE — neither source needs to know the other ran).
+- TWO rows in `agent_tokens` (one per source) so an operator querying
+  `/agents/tokens?spawn_id=<X>` sees both counts side by side and
+  spots disagreement at a glance.
+
+`TestTranscriptMultiSourceCoexistence` pins this contract empirically.
+
+#### Limitations
+
+- **Polling-latency floor.** Events surface 1 s after they hit disk
+  by default; tunable down to ~100 ms before syscall overhead starts
+  to bite (operators with a forensic-only deployment should leave it
+  at 1000 ms).
+- **Multi-file watcher.** `discoverFiles` walks `projectsRoot` on
+  every tick. With thousands of project subdirs this would scale
+  poorly; current heuristic is "Claude-Code users have O(tens) of
+  projects". A `time.Now().Sub(last walk) > 60 s`-style cache could
+  be added if walk cost ever shows up in a profile.
+- **Partial-line bookkeeping.** A trailing line without `\n` is NOT
+  consumed — we wait for the next tick. This is what makes mid-write
+  tail safe; downside is a stalled writer leaves the last line
+  invisible until either the writer completes or the file is
+  truncated.
+- **Corrupted-line tolerance.** JSON-decode failure on one line is
+  logged + skipped; subsequent lines proceed normally. Pinned by
+  `TestTranscriptTailCorruptedLineSkipped`.
+- **SessionRef intentionally empty.** The Claude-Code `sessionId` is
+  not the same domain as `sessions.id`; populating the FK would always
+  break. S4-S5 will add a separate cross-domain join layer.
+
 #### ADR-013: Multi-Ingest pattern for the agent-observability domain
 
 > **Status:** Accepted (confirmed 2026-05-17 via Admin-y-auf-alle-3 nach
