@@ -67,6 +67,8 @@ aktiver-auftrag: "#034 — Phase-2d-S3 MCP-Push (agent_event-Tool)"
 - **Status:** offen
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „S3 sofort" via AskUserQuestion. Routet S3 an belanna mit Pre-Hardcoding-Verifikation-Pflicht (3. Anwendung — diesmal für MCP-Tool-Schema-Konvention).
+  - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 5 Deliverables (Pre-Hardcoding-Verifikation + agent_event-Tool + Tests + 3-Source-Cross-Verifikation + ARCH-Erweiterung). Worker-Spawn ballard mit Pre-Hardcoding-Verifikation als Pflicht-Erststep (3. Anwendung — MCP-Tool-Schema-Konvention).
+  - 2026-05-17T (Pre-Hardcoding-Verifikation, ballard) — 4 Annahmen geprüft: (a) `started_at`-Briefing sagt `unix-ms`, Wire-Reality (handler/payload.go + store.go) = **unix-NANO** → Tool-Schema muss `ns`-Konvention spiegeln (sonst 1000× falsche Zeitstempel); (b) `tokens`/`verdict` sind **Top-Level-Arrays** in IngestPayload, NICHT embedded sub-structs in Spawn → Tool-Schema muss optional `tokens[]`/`verdicts[]` als eigenständige Param-Arrays modellieren; (c) mcp-go v0.45.0 in go.mod bestätigt, kein Upgrade; (d) `client.AgentsIngest`-Methode fehlt → wird additiv in `internal/client/agents.go` ergänzt (idiomatisch über `doRequest` statt rohem HTTP — wie `client.CrashesList`). Alle 4 Befunde lösen kein Auto-Stop aus, werden in Implementierung berücksichtigt.
 
 ---
 
