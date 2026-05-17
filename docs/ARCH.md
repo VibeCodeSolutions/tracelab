@@ -1854,3 +1854,162 @@ removing a source affects the data they return but not their shape.
 The `/agents/tokens` `by_source` breakdown grows a key when a source
 joins and loses a key when a source leaves; consumers tolerate this
 since each `by_source.<name>` block is independent.
+
+### Read-Surface (S4 implementation)
+
+Phase 2d S4 lit up the four GET endpoints alongside the existing
+`POST /agents/ingest`. They power the dashboard's Agents tab
+(`web/templates/tab_agents.gohtml`, `internal/dashboard/agents.go`)
+and any future read consumer (MCP read-tool, CLI inspector, external
+analyser). The endpoints are:
+
+| Method | Path | Bearer | Description |
+|---|---|---|---|
+| GET | `/agents/sessions` | yes | Paginated list of spawn rows ordered newest-first. Optional filters `?project=<exact>` and `?session_ref=<exact>`. Pagination via `?limit=` (default 50, max 500) and `?offset=`. |
+| GET | `/agents/tree/{spawn_id}` | yes | Root + every transitive descendant, BFS-ordered (siblings sorted by `started_at` ASC). Each node carries a `depth` field. Unknown id → 404. |
+| GET | `/agents/tokens?spawn_id=…` | yes | Token rows for the spawn, ordered `ts` ASC, with aggregated `totals` and a `by_source` breakdown keyed by `sdk-hook` / `transcript` / `mcp-push`. |
+| GET | `/agents/verdicts?spawn_id=…` | yes | Verdict rows for the spawn, ordered `ts` ASC. `lerneffekt_md` is omitted when NULL/empty. |
+
+**Response envelopes:**
+
+```jsonc
+// GET /agents/sessions
+{
+  "spawns": [ { "id":"…", "parent_id":"…", "skill":"…",
+                "started_at": 1700000000000000000, "ended_at": null,
+                "project":"…", "session_ref":"…" }, … ],
+  "total": 42,
+  "limit": 50,
+  "offset": 0
+}
+
+// GET /agents/tree/{spawn_id}
+{
+  "root": "<rootID>",
+  "nodes": [ { …SpawnWire, "depth": 0 },
+             { …SpawnWire, "depth": 1 }, … ]
+}
+
+// GET /agents/tokens?spawn_id=…
+{
+  "spawn_id": "<id>",
+  "tokens": [ { "id": …, "spawn_id":"…", "input_tokens":…,
+                "output_tokens":…, "cache_read":…, "cache_write":…,
+                "ts": 1700…, "source":"sdk-hook" }, … ],
+  "totals": {
+    "input_tokens": 3150, "output_tokens": 1575,
+    "cache_read": 0, "cache_write": 0,
+    "by_source": {
+      "sdk-hook":   { "input_tokens":1000, "output_tokens":500,
+                      "cache_read":0, "cache_write":0, "row_count":1 },
+      "transcript": { …, "row_count":1 },
+      "mcp-push":   { …, "row_count":1 }
+    }
+  }
+}
+
+// GET /agents/verdicts?spawn_id=…
+{
+  "spawn_id": "<id>",
+  "verdicts": [ { "id":1, "spawn_id":"…", "verdict":"freigabe",
+                  "lerneffekt_md":"…", "ts": 1700… }, … ]
+}
+```
+
+**Wireup posture — overlay in front of the chi router.** The four
+read endpoints are NOT registered through `internal/http/server.go`
+the way `POST /agents/ingest` is. The S4 cross-check-scope brief
+forbade touching `internal/http/`, so `cmd/hub/main.go` slots an
+`AgentsReadMux(token, next)` overlay-handler in front of the chi
+handler returned by `httplayer.New`. The overlay:
+
+- Recognises `GET /agents/{sessions,tree/*,tokens,verdicts}` by exact
+  prefix match; everything else (including `POST /agents/ingest` and
+  every non-/agents path) passes through to `next` unchanged.
+- Applies its own bearer-auth guard (same constant-time compare as
+  `internal/http.bearerAuth`, locally replicated in
+  `internal/agents/read.go`) before dispatching to the read handler.
+- Returns 401 / 400 / 404 / 500 in JSON envelopes matching the rest
+  of the API.
+
+This keeps the read surface strictly additive: zero bytes touched
+in `internal/http/`, zero bytes touched in the ingest handler
+(`handler.go`, `payload.go`, `transcript.go`). The trade-off is one
+extra middleware hop on `/agents/*` reads (negligible) versus a
+clean cross-check-scope audit; the latter wins because S4 is
+co-developed in a single branch where the ingest code from S1–S3
+is in flight and must not be perturbed by an unrelated read-surface
+addition.
+
+**Tree reconstruction — application-level walk, not WITH RECURSIVE.**
+The tree endpoint loads every spawn in the root's project in a flat
+SELECT (indexed on `project`), then walks parent → children pointers
+in-memory via a depth-by-id map. SQLite's `WITH RECURSIVE` would
+also work, but at the typical dataset size (10-100 spawns per
+project, occasional 1k) the flat-then-walk approach keeps the SQL
+small enough to inline-read, the unit test trivial, and avoids a
+CTE-syntax dependency the rest of the store layer does not have.
+A `visited` set keeps the walk terminating even if the schema's
+self-FK on `agent_spawns.parent_id` ever permits a cycle (no CHECK
+constraint forbids it). If a future deployment ships realistic
+projects with > 10 000 spawns, this is revisitable via ADR — the
+endpoint shape stays stable, only the implementation flips to a
+CTE.
+
+**Aggregation semantics on `/agents/tokens`.** The endpoint returns
+the raw rows (one per `(spawn_id, ts, source)` insert) plus two
+aggregate shapes:
+
+- `totals.*` is the cross-source sum (input + output + cache).
+  Useful for "what did this spawn cost end-to-end?".
+- `totals.by_source.<name>.*` is the per-source aggregate, keyed by
+  the canonical source string. Sources with zero rows are absent
+  from the map; consumers iterate the present keys. This is the
+  forensic view that ADR-013 §Consequences promised — when sdk-hook
+  reports 1000/500 and transcript reports 1100/550 for the same
+  spawn, the dashboard shows both side by side so the operator
+  spots the (in this case 10 %) drift between sources.
+
+**Dashboard "Agents" tab — Phase 2c-S5 stub replaced.** S4 swapped
+the placeholder body of `tab_agents.gohtml` for a typed-dot data-
+driven render. The tab body surfaces (1) the spawn list with parent
+→ child tree-glyph indent visible on the current page, (2) the
+aggregated token counts plus the per-source breakdown as a stacked
+list, (3) the latest verdict per spawn rendered as a coloured pill
+(`Freigabe` green / `Auflagen` warn / `Rückgabe` + `Eskalation`
+red), and (4) the Lerneffekt note inside a `<details>` disclosure
+so a verbose note doesn't bloat the row. Mailbox-edges and cross-
+references to the live-tail event stream are explicitly S5 scope
+(the Phase-2d sammel-gate); the S4 tab does not surface them.
+
+The tab layout uses the same `tl-tab-panel` + `tl-table-wrap` +
+`tl-empty-state` + `tl-error-card` patterns the sessions / crashes
+tabs use, so the visual language is uniform across all four tabs.
+Three new CSS rules cover the agent-specific shapes
+(`tl-agent-source-list`, `tl-agent-verdict-*`, `tl-agent-lerneffekt`)
+— additive to `dashboard.css`, no existing rule changed.
+
+**Test coverage.** Three test suites pin the S4 contract:
+
+- `internal/store/agents_read_test.go` — store-layer SQL forms
+  (ordering, filters, BFS-tree walk, per-source token preservation,
+  Lerneffekt NULL handling).
+- `internal/agents/read_test.go` — HTTP-layer surface (bearer auth,
+  pass-through of non-read paths, all four endpoint shapes,
+  per-source totals, 400 on missing query param, 404 on unknown
+  tree root, path-traversal rejection).
+- `internal/dashboard/agents_test.go` — template-render path
+  (empty state with and without store, full render with seeded
+  spawns, three-source aggregation in the rendered HTML, filter +
+  paging, parent → child tree-glyph rendering).
+- `internal/client/agents_test.go` — Go-client read methods
+  (`AgentsSessions`, `AgentsTree`, `AgentsTokens`, `AgentsVerdicts`)
+  with the same auth + non-nil-slice + happy-path posture the
+  existing read methods carry (CrashesList, SessionsList).
+
+A live-daemon E2E smoke (3-source fixture: sdk-hook + transcript +
+mcp-push tokens for the same spawn) was run against an in-process
+hub at start-up and confirmed the wire shape end-to-end: `1000 +
+1100 + 1050 = 3150` cross-source total, three populated
+`by_source` keys, BFS-ordered tree depth=0/1, freigabe verdict
+with Lerneffekt rendered in the tab body.
