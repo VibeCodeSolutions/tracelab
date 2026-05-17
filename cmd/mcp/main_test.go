@@ -41,11 +41,12 @@ func TestBuildServerConstructs(t *testing.T) {
 	}
 }
 
-// TestServerRegistersExpectedTools asserts the six real tools are
+// TestServerRegistersExpectedTools asserts the seven real tools are
 // present in the server's tool registry: sessions_list (S3), tail_since
-// (S4), adb_devices/adb_start/adb_stop (S5), crashes_list (S6). All
-// four S1 stubs have retired. Sorted-name comparison gives
-// deterministic failure messages when a tool moves in or out.
+// (S4), adb_devices/adb_start/adb_stop (S5), crashes_list (S6), and
+// agent_event (Phase 2d S3). All four S1 stubs have retired. Sorted-
+// name comparison gives deterministic failure messages when a tool
+// moves in or out.
 func TestServerRegistersExpectedTools(t *testing.T) {
 	t.Parallel()
 	c := newTestHubServer(t, http.NotFoundHandler())
@@ -53,10 +54,12 @@ func TestServerRegistersExpectedTools(t *testing.T) {
 	tools := s.ListTools()
 
 	// Sorted alphabetically: adb_devices, adb_start, adb_stop,
-	// crashes_list, sessions_list, tail_since. sessions_stub retired
-	// in S3, tail_stub in S4, adb_stub in S5, crashes_stub in this
-	// commit (S6) — Phase 2b stub-set is empty.
-	want := []string{"adb_devices", "adb_start", "adb_stop", "crashes_list", "sessions_list", "tail_since"}
+	// agent_event, crashes_list, sessions_list, tail_since.
+	// sessions_stub retired in P2b-S3, tail_stub in P2b-S4, adb_stub
+	// in P2b-S5, crashes_stub in P2b-S6 — Phase 2b stub-set is empty.
+	// agent_event lands in Phase 2d S3 as the seventh real tool
+	// (third multi-ingest source, ADR-013).
+	want := []string{"adb_devices", "adb_start", "adb_stop", "agent_event", "crashes_list", "sessions_list", "tail_since"}
 	got := make([]string, 0, len(tools))
 	for name := range tools {
 		got = append(got, name)

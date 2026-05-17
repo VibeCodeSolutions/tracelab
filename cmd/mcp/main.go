@@ -16,13 +16,26 @@
 //     ADR-004 Option B. Pure MCP-layer wiring; the client
 //     signature was extended additively to pass through the
 //     hub's idempotency discriminator (status field).
-//   - S6 (current):  crashes_list is the sixth real tool and the last
+//   - S6:            crashes_list is the sixth real tool and the last
 //     before Phase-2b closure. Wraps the new GET /crashes
 //     hub endpoint (ADR-009); newest-first session-scoped
 //     crash digest with limit cap. Store.CrashesBySession
 //     gained an additive `limit int` parameter — same
 //     additive-widening pattern S5 applied to the ADB
 //     status discriminator.
+//
+// Phase 2d status:
+//
+//   - S3 (current):  agent_event is the seventh real tool and the
+//     third (and last) of the three Phase-2d ingest
+//     sources for the agent observability stack (ADR-013).
+//     SDK-hooks push via the shell-script adapter (S1),
+//     transcript-tail scrapes JSONL from the daemon (S2),
+//     and agent_event lets a running worker (or any MCP
+//     client) push its own lifecycle envelope directly.
+//     The handler hardcodes source="mcp-push" before
+//     forwarding to POST /agents/ingest via the new
+//     client.AgentsIngest method.
 //
 // Stubs retired: all four S1 placeholders have moved out into their
 // own real-tool files (sessions_list / tail_since / adb_* / crashes_list).
@@ -157,6 +170,7 @@ func buildServer(hubClient *client.Client) *server.MCPServer {
 		newADBStartTool(hubClient),
 		newADBStopTool(hubClient),
 		newCrashesListTool(hubClient),
+		newAgentEventTool(hubClient),
 	)
 
 	// Stub registration loop — empty as of P2b-S6 (all four S1
