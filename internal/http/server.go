@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/VibeCodeSolutions/tracelab/internal/agents"
 	"github.com/VibeCodeSolutions/tracelab/internal/dashboard"
 	"github.com/VibeCodeSolutions/tracelab/internal/store"
 	"github.com/VibeCodeSolutions/tracelab/internal/ws"
@@ -54,6 +55,15 @@ type Config struct {
 	// registered — POST /adb/start and POST /adb/stop may still be wired
 	// up via ADBManager alone, but device discovery is unavailable.
 	ADBDeviceLister ADBDeviceLister
+
+	// Agents is the Phase-2d agent-observability handler bundle from
+	// internal/agents (ADR-013). When non-nil, POST /agents/ingest is
+	// registered inside the same bearer-protected sub-group as the
+	// other write endpoints (/session/*, /ingest). When nil, the
+	// /agents/* routes are omitted — production hubs always pass a
+	// non-nil handler (cmd/hub/main.go); HTTP-layer unit tests that
+	// don't exercise the agents domain pass nil.
+	Agents *agents.Handler
 
 	// Dashboard is the dashboard handler bundle from internal/dashboard
 	// (Phase 2c, ADR-011 Decision 4). When non-nil, /dashboard and
@@ -172,6 +182,15 @@ func New(st *store.Store, cfg Config) http.Handler {
 			// forward cursor); shares the bearer + 30s-timeout
 			// envelope with /events and /sessions.
 			tr.Get("/crashes", h.listCrashes)
+
+			// /agents/ingest — Phase 2d S1 (ADR-013). Sits in the
+			// bearer + 30s-timeout group alongside the other write
+			// endpoints. Registered conditionally on cfg.Agents so
+			// HTTP-layer tests that don't wire the agent domain
+			// (the bulk of pre-2d tests) keep behaving as before.
+			if cfg.Agents != nil {
+				tr.Post("/agents/ingest", cfg.Agents.Ingest)
+			}
 
 			// /adb/* routes — additive in S5 (ADR-004 Option B).
 			// Registered inside the same timeout-bounded group as the

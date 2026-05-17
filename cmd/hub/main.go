@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/VibeCodeSolutions/tracelab/internal/adb"
+	"github.com/VibeCodeSolutions/tracelab/internal/agents"
 	"github.com/VibeCodeSolutions/tracelab/internal/config"
 	"github.com/VibeCodeSolutions/tracelab/internal/dashboard"
 	httplayer "github.com/VibeCodeSolutions/tracelab/internal/http"
@@ -103,6 +104,11 @@ func run() error {
 		return fmt.Errorf("dashboard handler: %w", err)
 	}
 
+	// Agent-observability handler bundle (Phase 2d S1, ADR-013).
+	// Owns POST /agents/ingest — registered inside the bearer +
+	// 30s-timeout group via httplayer.Config below.
+	agentHandler := agents.NewHandler(st, logger)
+
 	addr := cfg.Server.Bind + ":" + strconv.Itoa(cfg.Server.Port)
 	handler := httplayer.New(st, httplayer.Config{
 		AuthToken:       cfg.Auth.Token,
@@ -111,6 +117,7 @@ func run() error {
 		ADBManager:      adbMgr,
 		ADBDeviceLister: adbDeviceListerFunc(adb.Devices),
 		Dashboard:       dashHandler,
+		Agents:          agentHandler,
 	})
 	if handler == nil {
 		return errors.New("http: New returned nil (auth token empty?)")
