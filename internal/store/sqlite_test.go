@@ -35,12 +35,16 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("want version 2, got %d", version)
+	if version != 3 {
+		t.Fatalf("want version 3, got %d", version)
 	}
 
-	// All four tables must exist.
-	for _, tbl := range []string{"sessions", "events", "crashes", "screenshots"} {
+	// Phase-1 + Phase-2d core tables must all exist.
+	for _, tbl := range []string{
+		"sessions", "events", "crashes", "screenshots",
+		// Phase 2d (migration 0003) — agent-observability layer.
+		"agent_spawns", "agent_tokens", "agent_verdicts", "agent_mailbox_edges",
+	} {
 		var name string
 		err := s.db.QueryRowContext(context.Background(),
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl,
@@ -59,7 +63,28 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Errorf("idx_crashes_session_fp missing: %v", err)
 	}
+
+	// Migration 0003: the three UNIQUE-tuple indexes (one per child table)
+	// that enforce the multi-ingest idempotency contract (ADR-013) must
+	// exist. We assert via sqlite_master because PRAGMA index_list returns
+	// a result-set per table which is noisier to thread through database/sql.
+	for _, idx := range []string{
+		"idx_agent_tokens_spawn_ts_source",
+		"idx_agent_verdicts_spawn_verdict_ts",
+		"idx_agent_edges_from_to_type_ts",
+		// Plus the started_at DESC ordering index used by recent-spawn reads.
+		"idx_agent_spawns_started_at",
+	} {
+		var name string
+		err := s.db.QueryRowContext(context.Background(),
+			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, idx,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("index %s missing: %v", idx, err)
+		}
+	}
 }
+
 
 func TestSessionLifecycle(t *testing.T) {
 	s := newTestStore(t)
@@ -146,8 +171,8 @@ func TestIdempotentMigrations(t *testing.T) {
 		`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("schema_migrations count = %d, want 2 (idempotent)", count)
+	if count != 3 {
+		t.Fatalf("schema_migrations count = %d, want 3 (idempotent)", count)
 	}
 }
 

@@ -58,6 +58,7 @@ aktiver-auftrag: "#032 — Phase-2d-S1 Skeleton + SDK-Hooks-Ingest"
 - **Status:** offen
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y auf alle 3" für S0-Auflagen-Bündel (Schema-Approval + Rebase + ADR-Form). Rebase lokal durch (`cfb8899`), Admin Force-Push manuell. `30_Wissen/ADR-Konventionen.md` angelegt (strikt-leer-Pattern für Proposed formalisiert). S1 routet an belanna mit Mandat. Sub-Sprint-Sequenz: S1 SDK-Hooks → S2 Transcript-Tail → S3 MCP-Push → S4 Agents-Tab → S5 Mailbox-Edges + Sammel-Gate.
+  - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 6 Deliverables (Migration-Move + Test-Bump + ADR-Finalize + Handler + Hook + Tests). Worker-Spawn ballard. Hook-Format-Verifikation als Pre-Hardcoding-Pflicht markiert (Auto-Stop bei Annahme-Bruch).
 
 ---
 
