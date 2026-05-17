@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2-tail-qs-grün — Worker (5 atomare Commits eb8ba6e..d9e70ef) + Sammel-Gate-QS (qs-20260517-001 freigabe/none/0 Findings + 5 Plus-Befunde) durch. Branch `chore/phase-2-tail` push-ready für FF-Merge nach `main`. Backlog-Staleness-Surprise (M2/M4/M5/M7-M10 bereits in #009 erledigt) als Methodik-Lerneffekt für künftige Tail-Sprints. Phase 2d (Agents-Stack ARCH-Vorab + Multi-Ingest) wartet auf Tail-Merge.
+status: phase-2d-eröffnet — Phase-2-Tail gemerged (`563ec27`, 6 Commits live auf main), Phase 2d (KI-Agenten-Stack, 6 Sub-Sprints S0+S1-S5) eröffnet mit S0 ARCH-Vorab. Multi-Ingest-Architektur Admin-confirmed (SDK-Hooks + Transcript-Tail + MCP-Push). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt. Auto-Stop nach S0 für Schema-Approval.
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260517-001
 phase-1-merge-commit: cee7a5d
@@ -9,7 +9,8 @@ phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
-aktiver-auftrag: "#030 — Phase-2-Tail QS-grün, wartet auf Admin-FF-Merge-Confirm"
+phase-2-tail-merge-commit: 563ec27
+aktiver-auftrag: "#031 — Phase-2d-S0 ARCH-Vorab (Pipeline-Doku + Schema + ADR-013)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -24,6 +25,36 @@ aktiver-auftrag: "#030 — Phase-2-Tail QS-grün, wartet auf Admin-FF-Merge-Conf
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #031 — Tracelab Phase-2d-S0 — ARCH-Vorab (Pipeline-Doku + Schema + ADR-013 Multi-Ingest)
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („agents stack" → Pre-Briefing 3-Fragen-AskUserQuestion 2026-05-17 mit Multi-Ingest-Antwort (SDK-Hooks + Transcript-Tail + MCP-Push) + ARCH-Vorab-Sprint-Stil + Tail-Sprint zuerst → „y" auf Tail-Sprint-Skelett → Tail #030 gemerged `563ec27` → „y" auf Phase-2d-Plan-Briefing 3-Block-Format) → Chakotay (Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt, Phase 2d eröffnet, S0 routet an belanna) → belanna
+- **Auftrag:** Phase 2d Sub-Sprint S0 = ARCH-Vorab vor Code-Sprints (S1-S5). Schema + Pipeline-Doku + Endpoint-Surface + ADR-013 für Multi-Ingest-Pattern in `docs/ARCH.md` festschreiben, BEVOR S1-S5 implementiert werden. **Auto-Stop nach S0** für Schema-Approval durch Admin.
+- **Branch:** `feat/phase-2d-agents` von `main`@`563ec27` (Belanna legt an)
+- **DoD S0:**
+  - **Pipeline-Doku in `docs/ARCH.md`:** neuer Architektur-Sub-Abschnitt „agent-ingest-layer" mit Diagramm (3 Quellen → 1 Persistenz-Form), Erläuterung der 3 Modi (push/pull), Tripwire-Pattern analog Phase 2b ADR-010
+  - **Schema-Definition (4 Tabellen):** `agent_spawns`, `agent_tokens`, `agent_verdicts`, `agent_mailbox_edges` — Felder, PRIMARY KEY, UNIQUE-Constraints, Indizes, Foreign-Keys (z.B. agent_tokens.spawn_id → agent_spawns.id), Idempotenz via spawn-ID (ULID empfohlen, an ADR-konkretisieren)
+  - **Endpoint-Surface:** `/agents/ingest` (POST, alle 3 Quellen), `/agents/sessions` (GET, Liste mit Pagination), `/agents/tree/{spawn_id}` (GET, Spawn-Tree-Subgraph), `/agents/tokens` (GET, Aggregation pro Session/Spawn), `/agents/verdicts` (GET, Verdict-Liste)
+  - **ADR-013 Multi-Ingest-Pattern:** Considered (Single-Source vs Multi-Ingest) / Decision (Multi-Ingest mit 3 Quellen) / Consequences / Rejected-Alternatives, Wire-Compat-Statement für die `/agents/ingest`-Payload-Form, Tripwire-Bedingung (welche Quelle ist „Primary" bei Konflikt?)
+  - **Migrations-File `0003_agents_schema.up.sql`** (vorbereitet, NICHT angewandt — wartet auf Schema-Approval)
+  - **KEIN Code:** S0 ist purer ARCH-Sprint, kein Handler-Code, keine MCP-Tools, keine Tests. Nur Doku + Migration-File + ADR.
+- **Verifikation:** ARCH.md-Diff lesbar, ADR-013-Block vollständig, Migration-File compiliert (`sqlite3 :memory: < migrations/0003_agents_schema.up.sql` mit Fake-Driver-Test).
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🟡 standard — Doku-Sprint, kein Code)
+  - QS-Spawn tuvok (Klasse standard, ARCH-Review + Schema-Sanity-Check)
+  - **Cross-Check-Scope (15. Anwendung):** Code-Pakete bleiben 0 Bytes Diff. Erlaubt: `docs/ARCH.md`, `docs/WORKLOG.md`, neue `migrations/0003_agents_schema.up.sql`.
+- **Auto-Stop nach S0:** Pflicht. Schema + ADR-013 + Endpoint-Surface gehen an Admin zur Approval. Erst nach „y" startet S1 (Skeleton + SDK-Hooks-Ingest).
+- **Auto-Stop sonst:**
+  - Schema-Architektur-Frage außerhalb des Plans (z.B. „brauchen wir agent_mailbox_edges separat oder als Tabelle in agent_spawns?") → Stop, Bericht
+  - Hook-Format-Annahme nicht verifizierbar → Stop, Klärung
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Phase-2d-Plan-Briefing (Blocks 1-3 in einem Schritt vorgelegt, alle Defaults aus Pre-Briefing + Phase-2a/b/c-Pattern getragen). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt. Routet S0 an belanna mit Auto-Stop-Pflicht nach S0 für Schema-Approval.
 
 ---
 
