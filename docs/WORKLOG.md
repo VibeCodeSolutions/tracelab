@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s3-qs-grün — Worker 5 Commits 81c9954..877bade + QS Tuvok schlanker Re-Spawn (qs-20260517-005) freigabe/none/0 Findings + 6 Plus-Befunde. **Multi-Ingest-Coverage KOMPLETT** (alle 3 Sources sdk-hook/transcript/mcp-push live + test-pinned via TestAgentsIngestThreeSourceCoexistence). Worker-Highlight: Pre-Hardcoding-Verifikation 3. Anwendung widerlegte 2 Briefing-Annahmen (unix-ms vs unix-NANO + sub-structs vs Top-Level-Arrays). 1. Tuvok-Spawn war 9h heartbeat-fail (Org-Limit) → schlanker Re-Spawn (Klasse standard, Token 200k, Stub-First) in 139s/64.7k Token durch — L26-Stub-First empirisch validiert. S4 (Agents-Tab funktional) wartet auf Admin-Entscheidung (S4 sofort vs 3-Klauseln-Methodik-Sweep Worker-Brief-Konventionen.md zuerst).
+status: phase-2d-s4-eroeffnet — S4 (Agents-Tab funktional) routet an belanna nach Admin „ja". Multi-Ingest-Pipeline (S1-S3) komplett, 3-Klauseln-Methodik-Promotion in Worker-Brief-Konventionen.md erledigt. S4 macht den Phase-2c-S5-Stub („coming soon") funktional: Read-API (`/agents/sessions`, `/agents/tree/{id}`, `/agents/tokens`, `/agents/verdicts` falls noch nicht da) + `tab_agents.gohtml`-Funktionalisierung mit Spawn-Tree-Viz + Token-Usage-Burn-Down + Verdict-Display. Mailbox-Edges erst S5. Cross-Check-Scope 19. Anwendung. Pre-Hardcoding-Verifikation 4. Anwendung (Hub-Read-Surface + Phase-2c-UI-Konventionen). Branch `feat/phase-2d-agents` @ `1f03d00`.
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260517-005
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,7 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#034 — Phase-2d-S3 QS-grün, wartet auf Admin-S4-Strategie-Entscheidung"
+aktiver-auftrag: "#035 — Phase-2d-S4 Agents-Tab funktional, an belanna geroutet"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,59 @@ aktiver-auftrag: "#034 — Phase-2d-S3 QS-grün, wartet auf Admin-S4-Strategie-E
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #035 — Tracelab Phase-2d-S4 — Agents-Tab funktional (Spawn-Tree + Token-Usage + Verdict)
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („ja" auf S4-Routing-Frage nach #034-Findings-Gate-Bericht) → Chakotay (S4 routet an belanna, 3-Klauseln-Methodik-Promotion in `Worker-Brief-Konventionen.md` ist bereits durch — kein Vor-Sweep mehr nötig) → belanna
+- **Auftrag:** S4 = **Agents-Tab funktional** — der „coming soon"-Stub aus Phase 2c-S5 (`tab_agents.gohtml`) wird durch echte Visualisierung der drei Multi-Ingest-Domain-Punkte ersetzt: (1) **Skill-Spawn-Tree** (Eltern-Kind-Hierarchie aus `parent_spawn_id`), (2) **Token-Usage-Burn-Down** (aggregiert über alle 3 Sources sdk-hook/transcript/mcp-push pro Spawn), (3) **Verdict-Display** (`agent_verdicts.verdict` + `lerneffekt`). **Mailbox-Edges + Cross-Refs zu Live-Tail kommt erst in S5** (Sammel-Gate-Charakter) — nicht in S4 vorgezogen.
+- **Branch:** `feat/phase-2d-agents` (HEAD `1f03d00`, S0+S1+S2+S3 + alle Findings-Gate-Syncs drauf, push synchron mit origin)
+- **DoD S4:**
+  - **Read-API-Endpoints (Hub-Side, falls noch nicht aus S1 vorhanden — Pre-Hardcoding-Verifikation klärt):**
+    - `GET /agents/sessions` — Liste aller Spawns (paginiert oder gefiltert nach project/started_at-Range)
+    - `GET /agents/tree/{spawn_id}` — Eltern-Kind-Subtree ab spawn_id (rekursive Auflösung über `parent_spawn_id`)
+    - `GET /agents/tokens?spawn_id=…` — Token-Counts pro Spawn (aggregiert über alle 3 Sources, mit Per-Source-Breakdown für Forensik)
+    - `GET /agents/verdicts?spawn_id=…` — Verdict + Lerneffekt pro Spawn
+    - Bearer-Auth analog zu allen anderen Endpoints
+  - **`tab_agents.gohtml`-Funktionalisierung (löst Phase-2c-S5-Stub ab):**
+    - Spawn-Tree-Liste: hierarchische Darstellung (Indent oder Tree-Glyphen — analog crashes/sessions-Tables, mobile-tauglich)
+    - Token-Usage-Anzeige pro Spawn (input/output/cache_creation/cache_read aggregiert; pro Source breakdown wenn Daten vorhanden)
+    - Verdict + Lerneffekt-Spalte / -Sektion
+    - Mobile-Floor 14px Schrift, 44px Tap-Targets, `tl-table-wrap`-Pattern wenn tabellarisch
+    - Empty-State (`tl-empty-state`-Klasse): „Noch keine Agenten-Daten — sobald SDK-Hooks/Transcript-Tail/MCP-Push schreiben, erscheinen Spawns hier"
+    - Error-State (`tl-error-card`-Klasse) bei API-Fehlern, analog zu sessions/crashes-Tabs
+  - **UI-Konventions-Konsistenz mit anderen Tabs (Phase 2c-S5-Polish):**
+    - CSS-Variablen aus `web/static/dashboard.css` (keine neuen Farb-Konstanten hardcoden)
+    - `tl-tab-panel`-Layout-Wrapper
+    - Konsistente Spaltenüberschriften-Form (Casing, Sortier-Indikator falls Tab andere haben)
+  - **Tests:**
+    - Handler-Tests pro Read-Endpoint (Bearer-Auth, Bad-Param, Empty-Data, Happy-Path mit seed-Spawn-Daten)
+    - Template-Render-Test (`TestAgentsTabRendersWithSpawnData`) ersetzt/erweitert den vorhandenen `TestAgentsTabRendersComingSoon`
+    - E2E-Smoke gegen Live-Daemon: Test-Fixtures aus allen 3 Sources einspielen → Tab zeigt Spawn-Tree + Tokens + Verdicts korrekt
+  - **ARCH.md-Erweiterung:** „Phase 2d — Agent-Ingest Layer"-Sektion bekommt eine **Read-Surface-Sub-Sektion** mit den 4 Endpoints + Response-Format-Tabelle (analog zu den Ingest-Sub-Sektionen aus S1/S2/S3)
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — Read-API + Tab-Funktionalisierung + Tests + ARCH-Erweiterung; UI-Anteil ist Polish-Charakter aber funktional, nicht Stub)
+  - QS-Spawn tuvok (Klasse release-qs nach Code-Done — Read-API-Konsistenz mit Phase-2b/2c-Endpoint-Pattern + UI-Konventions-Konsistenz mit anderen Tabs + Cross-Source-Aggregation-Korrektheit + Wire-Stability über alle bestehenden Pakete)
+  - **Cross-Check-Scope (19. Anwendung):** Erlaubt: `internal/agents/` (Read-Handler ergänzen — kein Touch der bestehenden Ingest-Logik handler.go/payload.go/transcript.go-Owner-Files außer additiv), `internal/store/agents.go` (Read-Queries — falls Ingest-Queries nicht reichen, additiv), `cmd/hub/main.go` (Route-Registrierung der neuen Read-Endpoints), `internal/dashboard/` (Agents-Tab-Handler — analog sessions/crashes), `web/templates/tab_agents.gohtml` (Funktionalisierung), `web/static/dashboard.css` (nur falls neue Pattern nötig — sonst Wiederverwendung), `internal/client/agents.go` (Client-Methoden für die 4 Read-Endpoints, analog `CrashesList`), `docs/ARCH.md`, `docs/WORKLOG.md`. **0 Bytes Diff in:** allen MCP-Tool-Files (`cmd/mcp/`), CLI-Files (`cmd/cli/`), Phase-1/2a-Pakete (`internal/adb/`, `internal/crash/`, `internal/ingest/`, `internal/ws/`, `internal/config/`, `internal/cliconfig/`, `internal/http/`). MCP-Push aus S3 bleibt unberührt.
+- **PRE-HARDCODING-VERIFIKATION (PFLICHT — 4. Anwendung):**
+  - **Read-API-Existenz prüfen:** Sind `/agents/sessions`/`/agents/tree/`/`/agents/tokens`/`/agents/verdicts` schon aus S1 da, oder müssen sie neu? Falls neu — Pattern aus bestehenden Read-Handlern (`crashes_list`, `sessions_list`) übernehmen, NICHT eigenes Pattern erfinden.
+  - **Store-Read-Queries:** vorhandene Funktionen in `internal/store/agents.go` katalogisieren BEVOR neue ergänzt werden (möglicherweise reichen die für Ingest geschriebenen Queries schon für Read-Surface — oder es gibt einen `GetSpawn(id)`-Helper der erweitert werden kann)
+  - **Tree-Aufbau-Strategie:** rekursive SQL-CTE vs. Application-Level-Reconstruction — beide Optionen analysieren, eine wählen, im ARCH.md begründen. **Auto-Stop bei Architektur-Frage** falls keine klare Standard-Lösung erkennbar.
+  - **Phase-2c-UI-Konventionen empirisch prüfen:** `web/templates/tab_{sessions,crashes,tail}.gohtml` lesen, CSS-Klassen-Namen + Empty-State-Pattern + Error-State-Pattern + Mobile-Wrapper-Pattern aus den existierenden Tabs übernehmen — nicht aus Briefing-Annahme.
+  - **Test-Fixtures für 3-Source-Aggregation:** S3 hat `TestAgentsIngestThreeSourceCoexistence` als Schema-Level-Pin. S4 sollte daraus oder analog ein Read-Side-Fixture aufbauen, das verifiziert: Read-Endpoint liefert korrekt aggregierte Tokens über alle 3 Sources zurück.
+- **Auto-Stop:**
+  - Read-Endpoint-Surface-Konflikt mit Phase-2b ADR-007 (Tool-Surface-Cut) → Stop + Klärung (sollte nicht passieren, Phase 2d ist neue Domain, aber Pattern-Konsistenz mit MCP-Tools für etwaige spätere MCP-Read-Tools wichtig)
+  - Tree-Reconstruction-Algorithmus zeigt Performance-Problem auf realistischen Daten → Stop + ADR-Vorschlag
+  - UI-Konvention bricht (z.B. neue Domain braucht nicht-tabellarische Darstellung) → Stop + Visual-Pattern-Klärung mit Admin
+  - Test-Smoke gegen Live-Daemon zeigt Aggregation-Bug → Stop + Schema-Re-Review
+- **Phasen-Status:** S4 ist 4. von 5 Sub-Sprints (S0+S1+S2+S3 alle ✅ QS-grün). Nach S4-QS-grün → S5 (Mailbox-Edges + Cross-Ref zu Live-Tail + Sammel-Gate über Phase 2d gesamt) — **kein Auto-Chain**, S5 hat Sammel-Gate-Charakter und ist explizit Auto-Stop laut Plan-Briefing.
+- **Status:** offen — wartet auf Belanna-Annahme
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „ja" auf S4-Routing-Frage. Routet S4 an belanna mit Pre-Hardcoding-Verifikation-Pflicht (4. Anwendung — Read-Surface-Existenz + UI-Konventionen + Tree-Aufbau-Strategie + Test-Fixtures). 3-Klauseln-Methodik aus Worker-Brief-Konventionen.md gilt jetzt regulär (Backlog-Hygiene + Pre-Hardcoding-Verifikation + Stub-First-für-QS-Re-Spawns).
 
 ---
 
