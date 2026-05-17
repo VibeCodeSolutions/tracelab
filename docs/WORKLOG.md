@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s0-qs-auflagen — Worker (`0759767`) + QS Tuvok (qs-20260517-002 auflagen/major) durch. 2 Findings: VC-031-BRANCH (Major, Cherry-Pick-Duplikat e05e43b von 47990de, FF-Merge bräche — Rebase mit Force-Push nötig) + VC-031-ADR-PROPOSED (Minor, ADR-013 Decision-Body-Form-Drift, T5-Promotion-Kandidat ADR-Konventionen) + 6 Plus-Befunde. Auto-Stop nach S0 für Schema-Approval gebündelt mit Findings-Klärung.
+status: phase-2d-s1-eröffnet — S0 ARCH-Vorab Admin-confirmed (Schema + ADR-013 Accepted + Rebase done `cfb8899` rebased von Branch, gepusht). 30_Wissen/ADR-Konventionen.md angelegt (strikt-leer-Pattern formalisiert). S1 (Skeleton + SDK-Hooks-Ingest) eröffnet — Migration verschieben Top-Level→embed-FS + Test-Counter Bump + ADR-013 Decision-Body finalisieren + Handler /agents/ingest + Tests.
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260517-002
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,7 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#031 — Phase-2d-S0 QS-auflagen, wartet auf Admin-Confirm (Schema-Approval + Rebase + ADR-Form)"
+aktiver-auftrag: "#032 — Phase-2d-S1 Skeleton + SDK-Hooks-Ingest"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,39 @@ aktiver-auftrag: "#031 — Phase-2d-S0 QS-auflagen, wartet auf Admin-Confirm (Sc
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #032 — Tracelab Phase-2d-S1 — Skeleton + SDK-Hooks-Ingest (erste der 3 Ingest-Quellen)
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („y auf alle 3" — Schema-Approval + Rebase-Force-Push + strikt-leer-ADR-Pattern) → Chakotay (Rebase lokal `cfb8899`, Admin Force-Push manuell ausgeführt, `30_Wissen/ADR-Konventionen.md` angelegt, S1 eröffnet) → belanna
+- **Auftrag:** Phase 2d Sub-Sprint S1 = **Skeleton + erste Ingest-Quelle (SDK-Hooks)**. Migration aus S0 anwenden, ADR-013 von Proposed → Accepted finalisieren, `/agents/ingest`-Handler implementieren, SDK-Hooks-Source als erste Pipeline live.
+- **Branch:** `feat/phase-2d-agents` (HEAD `cfb8899`, gerebased + force-pushed, sauber von main@`47990de`)
+- **DoD S1:**
+  - **Migration verschieben:** `migrations/0003_agents_schema.up.sql` + `.down.sql` → `internal/store/migrations/` (embed-FS). Migration wird beim Daemon-Start automatisch angewandt.
+  - **Test-Counter bump:** `internal/store/sqlite_test.go` `TestOpenAndMigrate` — `want version 2` → `want version 3`. Voller Migration-Apply-Test (4 neue Tabellen anlegen via Daemon-Start, verifizieren über sqlite-Reflection).
+  - **ADR-013 Decision-Body finalisieren:** Status `Proposed` → `Accepted (confirmed 2026-05-17 via Admin-y-auf-alle-3)`. Decision-Body befüllen mit `**(d) Multi-Ingest 3 Quellen** — gewählt am 2026-05-17, confirmed durch Admin via chakotay-routing-bestätigung. Begründung: Robustheit gegen Hook-Lücken, Explicitness bei MCP-Push, Vollständigkeit via Transcript-Tail.` Form gemäß `XBrain/30_Wissen/ADR-Konventionen.md` Lifecycle-Transition Proposed→Accepted.
+  - **POST `/agents/ingest`-Handler in `internal/dashboard/` oder neuem `internal/agents/`-Package:**
+    - Diskriminator-Pattern: `source`-Feld im Payload (`sdk-hook|transcript|mcp-push`), Bearer-Auth analog `/ingest`
+    - Idempotenz: gleiche `spawn_id` + `source` → 200 OK no-op (nicht 409)
+    - Persistenz in `agent_spawns` + `agent_tokens` + `agent_verdicts` + `agent_mailbox_edges` je nach Payload-Sektion
+  - **SDK-Hooks-Source-Skeleton:** Hook-Skript-Template oder Doku, wie ein Claude-Code-Hook `PostToolUse`/`Stop` an `/agents/ingest` postet. Ein lauffähiges Beispiel — Hook in `~/.claude/scripts/tracelab-agent-hook.sh` (oder analog), Daemon empfängt + persistiert. **Hook-Format-Verifikation:** echter PostToolUse-Payload-Shape prüfen bevor Persistenz-Logik darauf hardcoded wird — Auto-Stop falls Annahme nicht hält.
+  - **Tests:** Handler-Tests (Smoke + Idempotenz + Multi-Source-Koexistenz), Migration-Test (4 Tabellen vorhanden), Integration-Test (Hook-Skript → Hub → DB-Row).
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — Code + Schema-Apply + Hook-Integration + Tests)
+  - QS-Spawn tuvok (Klasse release-qs nach Code-Done)
+  - **Cross-Check-Scope (16. Anwendung):** Erlaubt: `internal/store/migrations/0003_*.sql` (move + delete top-level), `internal/store/sqlite_test.go` (Counter-Bump), `docs/ARCH.md` (ADR-013-Finalize), `docs/WORKLOG.md` (Verlauf), neue `internal/agents/`-Files oder `internal/dashboard/agents.go`, `internal/http/server.go` (Route-Wireup), Hook-Skript-Beispiel (`scripts/agent-hook.sh` o.ä.).
+- **Auto-Stop:**
+  - Hook-Format-Annahme nicht verifizierbar (PostToolUse-Payload-Shape unklar) → Stop + Klärung
+  - Architektur-Frage: neues `internal/agents/`-Package vs. Erweiterung `internal/dashboard/` → Lead-Entscheidung, kein Stop nötig, dokumentieren
+  - Multi-Source-Idempotenz-Konflikt im Test (UNIQUE bricht) → Stop + Schema-Re-Review
+- **Phasen-Status:** S1 ist erste der 3 Ingest-Quellen. Nach S1-QS-grün Auto-Chain zu S2 möglich (Transcript-Tail-Bridge). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` Sub-Sprint-Map.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „y auf alle 3" für S0-Auflagen-Bündel (Schema-Approval + Rebase + ADR-Form). Rebase lokal durch (`cfb8899`), Admin Force-Push manuell. `30_Wissen/ADR-Konventionen.md` angelegt (strikt-leer-Pattern für Proposed formalisiert). S1 routet an belanna mit Mandat. Sub-Sprint-Sequenz: S1 SDK-Hooks → S2 Transcript-Tail → S3 MCP-Push → S4 Agents-Tab → S5 Mailbox-Edges + Sammel-Gate.
 
 ---
 
