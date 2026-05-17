@@ -1219,3 +1219,409 @@ Lead-Empfehlung Ballard P2c-S1 übernommen ohne Korrektur.
 - **gRPC-Web streaming.** Considered for completeness. Rejected
   because the repo has no gRPC surface today; introducing it for one
   dashboard endpoint is a stack expansion with no other consumer.
+
+---
+
+## Phase 2d — Agent-Ingest Layer
+
+Plan: `~/.claude/plans/tracelab-phase-2d-agents.md`. Scope confirmed
+2026-05-17 (Admin „y" on Multi-Ingest pattern: SDK-Hooks + Transcript-Tail
++ MCP-Push, 6 sub-sprints S0+S1–S5). S0 (this section) is a pure-doc
+sprint: pipeline shape, schema, endpoint surface, and ADR-013. No
+handler code, no MCP tool, no test. S1 implements the first ingest
+source (SDK-Hooks) once the schema is admin-approved.
+
+Phase 2d adds a second data domain to the hub: the **AI-agent
+observability domain** (skill spawns, token usage, verdicts, mailbox
+edges between agents), alongside the existing **app-log domain**
+(sessions/events/crashes/screenshots from Phase 1). The two domains
+coexist in the same SQLite store, share the same daemon lifecycle, and
+surface side-by-side in the dashboard (Phase 2c added the agents-tab
+stub in S5 — Phase 2d S4 fills it).
+
+### Architecture — three ingest sources, one persistence shape
+
+```
+                            ┌────────────────────────────────────────┐
+                            │           tracelab-hub (Daemon)        │
+                            │                                        │
+   Claude Code Worker ─────►│  SDK-Hooks (push)                      │
+   PostToolUse/Stop hook    │    └─► POST /agents/ingest             │
+   HTTP-POST                │        source=sdk-hook                 │
+                            │        ─►  store.agent_*               │
+                            │                                        │
+   ~/.claude/projects/      │  Transcript-Tail (pull)                │
+   */*.jsonl ──────────────►│    └─► hub-internal tail-goroutine     │
+   (file mtime watch)       │        (analog adb logcat-bridge)      │
+                            │        ─►  POST /agents/ingest         │
+                            │            source=transcript           │
+                            │        ─►  store.agent_*               │
+                            │                                        │
+   tracelab-mcp ───────────►│  MCP-Push (active)                     │
+   agent_event tool         │    └─► POST /agents/ingest             │
+   from-worker call         │        source=mcp-push                 │
+                            │        ─►  store.agent_*               │
+                            │                                        │
+                            │                  ▼                     │
+                            │  Persistence (4 tables, dedup-on-      │
+                            │  UNIQUE-tuple per source)              │
+                            │    agent_spawns                        │
+                            │    agent_tokens          ──┐           │
+                            │    agent_verdicts          ├─► Hub.    │
+                            │    agent_mailbox_edges   ──┘  Publish  │
+                            │                                ─► WS   │
+                            │                                ─► SSE  │
+                            │                                        │
+   Browser ─HTTP───────────►│  /dashboard (Phase 2c) + Agents tab    │
+                            │   ↑ reads agent_* via Phase-2d         │
+                            │     read endpoints                     │
+                            └────────────────────────────────────────┘
+                                          │
+                                          ▼
+                            SQLite (NTFS-shared, same store as
+                            sessions/events/crashes/screenshots —
+                            no second DB, no second daemon)
+```
+
+Three ingest modes coexist as concurrent writers to the same four-table
+schema; idempotency keeps duplicates from compounding (see §Schema and
+ADR-013 below).
+
+| Source | Mode | Latency | Robustness | Trigger / Carrier |
+|---|---|---|---|---|
+| **SDK-Hooks** | push | low (sub-second) | depends on hook configuration | Claude Code worker's `PostToolUse` / `Stop` hooks shell out to `curl` or a tiny CLI helper that POSTs to `/agents/ingest` |
+| **Transcript-Tail** | pull | mid (1–5 s tail cycle) | robust against hook gaps — works even on workers without hook config | hub-internal goroutine tails `~/.claude/projects/*/*.jsonl` analogous to the existing adb logcat bridge (`internal/adb/`), parses spawn / token / verdict events, POSTs internally |
+| **MCP-Push** | active | low (sub-second) | explicit, workflow-instrumented | `agent_event` tool in `tracelab-mcp` (Phase 2d S3) called by the worker itself from inside the conversation — atomic with the action it reports |
+
+### Tripwire pattern — primary-vs-fallback by event type
+
+Each of the three sources has a domain where it is the **primary** writer
+(low latency or atomically authoritative) and another where it acts as a
+**fallback** that fills the gap when the primary is silent. The hub does
+not reject duplicates — the UNIQUE-tuple constraints in §Schema collapse
+them to one row, with a per-source breakdown preserved in
+`agent_tokens.source` for forensic comparison.
+
+| Event class | Primary source | Why primary | Fallback(s) | Fallback trigger |
+|---|---|---|---|---|
+| **Spawn-begin / spawn-end** (lifecycle edges) | **MCP-Push** | The worker itself emits the event the instant the spawn begins, atomically with the action — no observer-loss window. | Transcript-Tail (catches the spawn from the `.jsonl` even if the worker never called the tool); SDK-Hooks (catches via `PostToolUse` for tool-invoking spawns) | MCP-Push heartbeat silent > 60 s for a known-active project |
+| **Token-usage deltas** | **SDK-Hooks** | The `Stop` hook fires with the final usage block in scope; one hook = one full token event, no parsing of streamed deltas. | Transcript-Tail (reads the `.jsonl` `usage` blocks post-hoc) | SDK-Hook heartbeat silent > 60 s OR per-project hook config absent (detected by Transcript-Tail seeing usage rows that have no matching SDK-Hook row within 60 s) |
+| **Verdict + Lerneffekt** (QS-output) | **MCP-Push** | The QS-skill (tuvok / icheb / carey) emits the verdict via `agent_event` as part of its own workflow — atomic with the QS-skill's other actions and naturally typed. | Transcript-Tail (last-resort extraction from the QS-skill's `.jsonl` message body via a regex on the verdict marker) | MCP-Push call for a verdict was never made within the QS-skill's spawn-end window |
+| **Mailbox-edges** (spawn / return / escalate / delegate) | **MCP-Push** | Cross-agent edges are created at the moment of mailbox-routing — the routing skill (chakotay / lead) emits the edge atomically. | Transcript-Tail (infers edges from `.jsonl` cross-references between worker sessions); SDK-Hooks (infers from `Stop` events that follow a spawn-call) | MCP-Push call absent within the spawning conversation's frame |
+
+**Fallback-switch criterion:** the hub tracks a per-source last-write
+timestamp per project. When the primary source's last-write is older
+than 60 s for an actively-running spawn (detected by `agent_spawns`
+rows with `ended_at IS NULL`), the hub logs a `WARN` and the fallback
+source's row becomes the surviving record under the UNIQUE-tuple.
+ADR-013 §Consequences spells out the operational contract.
+
+**Pattern inheritance:** this is the same tripwire model used in Phase
+2b for the `/crashes` index-design decision (ADR-009 §Tripwire) and in
+Phase 1 for the slow-subscriber-drop in `ws.Hub.Publish` — a measurable
+condition that, when crossed, opens an explicit ADR or escalates to a
+fallback path, rather than silently degrading. Phase 2d's tripwire
+extends the pattern from a single-source-degradation alarm to a
+multi-source-redundancy switch.
+
+### Schema (migration `0003_agents_schema.up.sql`)
+
+The schema lives in `migrations/0003_agents_schema.up.sql` (top-level
+`migrations/` directory, deliberately **outside** the
+`internal/store/migrations/` embed-FS so that S0 ships the schema as a
+review artefact without auto-applying it on the next `Open` —
+Auto-Stop-pflicht for admin-approval; S1 moves the file into
+`internal/store/migrations/` and adjusts the migration-count tests in
+the same commit as the first ingest handler).
+Four tables, all foreign-keyed back to `agent_spawns.id` (the global
+identifier). `agent_spawns.session_ref` is a nullable FK into
+`sessions.id` (Phase 1) — spawns triggered outside an app-session
+context (e.g. a standalone QS-skill invocation) have a NULL ref and
+that is correct.
+
+**`agent_spawns`** — one row per skill / subagent invocation. The
+spawn lifecycle row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PRIMARY KEY | ULID-shaped 26-char string (consistent with `sessions.id`; the Phase-1 `newSessionID()` helper in `internal/store/sqlite.go` already produces this shape with no external dep). Globally unique across all sources — the writer supplies it. |
+| `parent_id` | TEXT NULL | Self-FK to `agent_spawns(id)` `ON DELETE SET NULL`. NULL for top-level spawns (Admin / Chakotay-routing-root). |
+| `skill` | TEXT NOT NULL | Skill slug (`ballard`, `tuvok`, `icheb`, …). |
+| `started_at` | INTEGER NOT NULL | Unix-ms timestamp. |
+| `ended_at` | INTEGER NULL | Unix-ms. NULL while the spawn is in-flight; populated on `Stop` event. |
+| `project` | TEXT NOT NULL | Project slug (`tracelab`, `nexus`, …) — derived from the cwd-detection convention or the worker's project frontmatter. |
+| `session_ref` | TEXT NULL | FK into `sessions.id` `ON DELETE SET NULL` — nullable for spawns without app-session context. |
+
+**Indexes:** `(parent_id)`, `(project)`, `(session_ref)`, `(started_at DESC)`
+(the last one drives the "recent spawns" query for the dashboard list view).
+Primary key on `id` is sufficient for idempotency — ULID is globally unique
+across all sources, so no extra UNIQUE-tuple needed on this table.
+
+**`agent_tokens`** — append-only token-usage events per spawn.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Surrogate. |
+| `spawn_id` | TEXT NOT NULL | FK into `agent_spawns(id)` `ON DELETE CASCADE`. |
+| `input_tokens` | INTEGER NOT NULL DEFAULT 0 | |
+| `output_tokens` | INTEGER NOT NULL DEFAULT 0 | |
+| `cache_read` | INTEGER NOT NULL DEFAULT 0 | |
+| `cache_write` | INTEGER NOT NULL DEFAULT 0 | |
+| `ts` | INTEGER NOT NULL | Unix-ms timestamp of the token-usage event. |
+| `source` | TEXT NOT NULL | `CHECK(source IN ('sdk-hook','transcript','mcp-push'))` — discriminator preserved per row for forensic comparison when two sources disagree. |
+
+**UNIQUE constraint:** `(spawn_id, ts, source)` — the same token event
+from the same source kollidiert (idempotency under hook retry); the
+same token event from a *different* source is allowed as a separate row,
+keeping per-source forensics intact (see ADR-013 §Consequences).
+
+**Indexes:** `(spawn_id, ts, source)` UNIQUE (above), and a covering
+`(spawn_id)` for token-aggregation queries.
+
+**`agent_verdicts`** — QS verdicts emitted by tuvok / icheb / carey.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Surrogate. |
+| `spawn_id` | TEXT NOT NULL | FK into `agent_spawns(id)` `ON DELETE CASCADE` — refers to the *spawn that was reviewed*, not the QS-skill's own spawn. |
+| `verdict` | TEXT NOT NULL | `CHECK(verdict IN ('freigabe','auflagen','rueckgabe','eskalation','none'))`. |
+| `lerneffekt_md` | TEXT NULL | Markdown text of the Lerneffekt note, nullable for verdicts without an explicit lesson. |
+| `ts` | INTEGER NOT NULL | Unix-ms. |
+
+**UNIQUE constraint:** `(spawn_id, verdict, ts)` — same verdict from two
+sources kollidiert on the same ts. Different verdicts at different ts
+for the same spawn (e.g. initial `auflagen` followed by `freigabe` after
+fix) are kept as separate rows — the QS history is intact.
+
+**Index:** `(spawn_id)` for verdict-lookup-by-spawn.
+
+**`agent_mailbox_edges`** — directed cross-agent edges (who routed to whom).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Surrogate. |
+| `from_spawn_id` | TEXT NOT NULL | FK into `agent_spawns(id)` `ON DELETE CASCADE`. |
+| `to_spawn_id` | TEXT NOT NULL | FK into `agent_spawns(id)` `ON DELETE CASCADE`. |
+| `edge_type` | TEXT NOT NULL | `CHECK(edge_type IN ('spawn','return','escalate','delegate'))`. |
+| `ts` | INTEGER NOT NULL | Unix-ms. |
+
+**UNIQUE constraint:** `(from_spawn_id, to_spawn_id, edge_type, ts)` —
+same edge from two sources kollidiert.
+
+**Indexes:** the UNIQUE-tuple plus `(from_spawn_id)` and `(to_spawn_id)`
+for tree-walk queries in both directions (recursive CTE for `/agents/tree/{id}`).
+
+### Endpoint surface
+
+All endpoints sit under the standard hub authentication regime (Bearer
+on every authenticated route — see API Conventions). The ingest endpoint
+is shared by all three sources; reads are per-domain.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/agents/ingest` | yes | Unified ingest from all three sources, discriminated via `source` field in the JSON payload (`sdk-hook` / `transcript` / `mcp-push`). Idempotent: re-POSTing the same `(spawn_id, ts, source)` tuple returns 200 OK no-op (consistent with the Phase-1 `/ingest` 202-on-already-there pattern and the Phase-2a `/adb/*` 200-OK-with-discriminator pattern — see API Conventions §Idempotent state-mutating endpoints). 201 only on first-write. |
+| GET | `/agents/sessions` | yes | List of agent spawns with cursor-based pagination — `?limit=N&cursor=<opaque>` (consistent with `/sessions` and `/events` pagination shape). Returns `{spawns: [...], next_cursor: "..."}`. |
+| GET | `/agents/tree/{spawn_id}` | yes | Subgraph for the given spawn: parent-chain up to the root plus all descendants, via SQLite recursive CTE on `agent_spawns(parent_id)`. Returns `{root: {...}, nodes: [...], edges_from_mailbox: [...]}`. |
+| GET | `/agents/tokens` | yes | Token-usage aggregation. Filter via `?session=<ref>` and/or `?spawn_id=<id>`. Returns sum across all sources plus per-source breakdown (`{total: {...}, by_source: {sdk-hook: {...}, transcript: {...}, mcp-push: {...}}}`) so the dashboard can show "they agree" or "they disagree by N tokens" at a glance. |
+| GET | `/agents/verdicts` | yes | Verdict list with filter on `?status=<verdict>` and/or `?project=<slug>` and/or `?session=<ref>`. Returns `{verdicts: [{spawn_id, verdict, lerneffekt_md, ts, skill}], next_cursor: "..."}`. |
+
+**`POST /agents/ingest` payload shape (wire-compat across all 3 sources):**
+
+```json
+{
+  "spawn_id":   "01HXXX...",          // ULID, required, idempotency key
+  "parent_id":  "01HYYY...",          // optional, for spawn lifecycle events
+  "skill":      "ballard",            // required
+  "project":    "tracelab",           // required
+  "session_ref": "01HSESS...",        // optional (FK to sessions, nullable)
+  "started_at": 1715900000123,        // unix-ms; required on first spawn-begin
+  "ended_at":   1715900099456,        // unix-ms; required on spawn-end
+  "tokens": {                          // optional; usage event
+    "input_tokens":  12345,
+    "output_tokens": 678,
+    "cache_read":    0,
+    "cache_write":   0,
+    "ts":            1715900050000
+  },
+  "verdict": {                         // optional; QS-output event
+    "verdict":       "freigabe",
+    "lerneffekt_md": "...",
+    "ts":            1715900070000
+  },
+  "mailbox_edges": [                   // optional; cross-agent routing events
+    { "from_spawn_id": "01HZZZ...", "to_spawn_id": "01HAAA...",
+      "edge_type": "spawn", "ts": 1715900001000 }
+  ],
+  "source":     "sdk-hook"             // required: discriminator
+}
+```
+
+**Source-specific payload shape (which fields each source typically fills):**
+
+| Source | Spawn-lifecycle | Tokens | Verdict | Mailbox-edges |
+|---|---|---|---|---|
+| **SDK-Hooks** | partial (`Stop` carries spawn-end, `PostToolUse` doesn't carry spawn-begin natively) | yes (`Stop` hook has full usage in scope) | rarely (hooks don't introspect QS-output) | inferred (`Stop`-after-spawn-call) |
+| **Transcript-Tail** | partial (catches lifecycle from `.jsonl` post-hoc, with 1–5 s tail-cycle latency) | yes (parses `usage` blocks in `.jsonl`) | last-resort regex (verdict-marker pattern) | inferred (cross-references in `.jsonl`) |
+| **MCP-Push** | full (worker emits both begin and end atomically) | yes (worker reports its own usage explicitly) | yes (QS-skill's `agent_event` call is naturally typed) | full (routing-skill emits edges directly) |
+
+Fields not relevant to a given source are simply omitted — `decodeJSON`
+in the hub rejects unknown fields but accepts missing optional fields,
+so payload shape stays small per source while the schema underneath
+captures the union.
+
+#### ADR-013: Multi-Ingest pattern for the agent-observability domain
+
+> **Status:** Proposed (S0 ARCH-Vorab — awaits Admin-Confirm; promoted
+> to Accepted in S1 once approved, before any handler code is written).
+> Lead recommendation in this ADR Body, Decision block holds the
+> Lead-Empfehlung as the chosen direction explicitly subject to
+> Admin-Confirm — same Decision-Block-Disziplin pattern as ADR-007
+> (P2b-S2) and ADR-012 (P2c-S1).
+
+##### Context
+
+The agent-observability domain (Phase 2d) needs four event classes
+captured: spawn lifecycle (begin/end), token-usage deltas, QS verdicts
+with Lerneffekt notes, and cross-agent mailbox edges. Three plausible
+ingest sources exist, each with its own coverage gap (see Phase-2d
+Architecture §Architecture above for the source matrix):
+
+- **SDK-Hooks** (`PostToolUse`, `Stop`) — low-latency push. Gap: a
+  worker without hook configuration (or with a hook that errored out
+  silently) emits nothing — the lifecycle is lost.
+- **Transcript-Tail** — robust pull from `~/.claude/projects/*/*.jsonl`,
+  works on every worker regardless of hook config. Gap: 1–5 s tail
+  cycle (no sub-second latency); no atomic spawn-begin event (the
+  `.jsonl` line for spawn-begin arrives only once the worker has emitted
+  its first message).
+- **MCP-Push** (`agent_event` tool in `tracelab-mcp`) — explicit,
+  workflow-instrumented, atomic with the action being reported. Gap:
+  workflow-pflicht — the worker has to actively call the tool; in
+  practice this is forgotten or skipped, especially during exploratory
+  spawns.
+
+Pre-Phase-2d analysis (Block-Briefing 2026-05-17) found that none of
+the three sources alone covers all four event classes reliably across
+all worker configurations. The schema and dashboard semantics require
+high-completeness lifecycle and usage data; partial coverage degrades
+both the spawn-tree visualisation and the token-burn-down chart in S4.
+
+##### Options considered
+
+**(a) Single-Source SDK-Hooks.** Push, low-latency. Reject: workers
+without hook config emit nothing; in a heterogeneous skill ecosystem
+(some skills are hook-aware, others are not — see XBrain/30_Wissen
+skill conventions), this leaves observability holes that show up as
+missing tree nodes.
+
+**(b) Single-Source Transcript-Tail.** Pull, robust against config
+drift. Reject: 1–5 s latency on spawn-begin means the dashboard live-tail
+of the agent stream visibly lags the actual spawn; the operator sees a
+spawn finish on the live-tail before they see it begin, which breaks
+the mental model.
+
+**(c) Single-Source MCP-Push.** Active, atomic. Reject: workflow-pflicht
+is a soft contract — in practice the `agent_event` tool will be
+forgotten in exactly the cases that matter most (an escalating spawn
+that doesn't follow its own conventions). Missed-emit failure mode is
+silent: there is no "did the worker call the tool?" probe.
+
+**(d) Multi-Ingest with all three sources writing into the same schema.**
+Coverage via redundancy: a missed-emit by one source is caught by
+another. Cost: idempotency must be enforced at the schema layer (the
+hub cannot trust the sources to agree on event identity), and the
+operator needs a forensic view when two sources disagree on the same
+event's data (token counts, verdict text).
+
+##### Decision
+
+**(d) Multi-Ingest with three concurrent sources.**
+
+Lead recommendation Ballard P2d-S0, subject to Admin-Confirm. The four
+event-class-to-primary-source mappings in §Architecture §Tripwire
+pattern are part of this decision (which source is authoritative for
+which event class; which source acts as fallback under what trigger).
+
+##### Consequences
+
+- **Idempotency is enforced at the schema layer.** Three UNIQUE-tuple
+  constraints — `agent_tokens(spawn_id, ts, source)`,
+  `agent_verdicts(spawn_id, verdict, ts)`,
+  `agent_mailbox_edges(from_spawn_id, to_spawn_id, edge_type, ts)` —
+  collapse same-event-from-same-source duplicates to one row. The
+  `agent_spawns.id` is supplied by the writer as a ULID, globally
+  unique across all sources, so the spawn lifecycle row needs no
+  composite UNIQUE.
+- **Per-source forensic breakdown is preserved.** `agent_tokens.source`
+  is a column, not just a write-time-only discriminator — when two
+  sources report different `input_tokens` for the same `(spawn_id, ts)`,
+  both rows survive and `/agents/tokens` exposes the disagreement
+  through the `by_source` breakdown. This makes "the hook and the
+  transcript disagree by 200 tokens" investigatable instead of
+  silently averaged-away.
+- **Tripwire-tests are mandatory in S1+S2.** When the primary source
+  for an event class is silent past the 60 s heartbeat threshold while
+  spawn-end is still pending (`ended_at IS NULL`), the hub logs a
+  structured `WARN` and the fallback row becomes the surviving record
+  under the UNIQUE-tuple. The tests pin: (i) fallback fills the gap
+  with no data loss, (ii) primary recovery does not re-collide on the
+  fallback's surviving row, (iii) `WARN` is emitted (not a silent
+  fallback).
+- **Wire-compat of the `/agents/ingest` payload.** Fields are
+  fakultativ per source (a Transcript-Tail call often carries only
+  `tokens` and `verdict` for an existing `spawn_id`; an SDK-Hook call
+  on `Stop` carries the full lifecycle; an MCP-Push call carries
+  whatever the worker reports). The `source` discriminator is
+  required. Adding a fourth source later (e.g. an OpenTelemetry
+  exporter) is a new value in the `CHECK(source IN ...)` enum on
+  `agent_tokens.source` plus a schema migration — backwards compatible
+  with the three existing sources (their payload shape doesn't change).
+- **Three concurrent writers in production.** The hub's existing
+  SQLite `MaxOpenConns=1` discipline (`internal/store/sqlite.go`)
+  already serialises concurrent writes; multi-ingest does not change
+  that contract. Throughput envelope is unchanged (the bottleneck is
+  not three POSTs vs one; it is the SQLite single-writer lane).
+- **Audit-trail: `agent_spawns` rows never carry a `source`.** The
+  spawn identity is one ULID, regardless of which source first wrote
+  it. The `source` discrimination only matters per event below the
+  spawn — tokens, verdicts, edges — where two sources can carry the
+  same event semantics but disagree on the payload values.
+- **No new dependency.** All three sources POST plain JSON to
+  `/agents/ingest`. SDK-Hooks shells out to `curl` (or a tiny
+  cross-compiled CLI helper, decided in S1); Transcript-Tail runs
+  in-process inside the hub (no second daemon); MCP-Push reuses
+  `internal/client/` from inside `tracelab-mcp`.
+
+##### Rejected (in detail)
+
+- **(a) SDK-Hooks-only** — see §Options. The deal-breaker is the
+  silent-config-drift mode: a hook config that errors out emits
+  nothing, and the operator only notices when the spawn-tree shows
+  gaps. By the time the gap is investigated, the spawn is long over.
+- **(b) Transcript-Tail-only** — the spawn-begin latency makes the
+  live-tail-of-agents tab visibly wrong. The dashboard's mental model
+  is "what is happening right now" — a 5 s lag on lifecycle events
+  breaks that, and there is no way to repair it within a pull-only
+  architecture.
+- **(c) MCP-Push-only** — the missed-emit failure mode is silent and
+  correlates exactly with the most-interesting spawns (escalations,
+  unusual workflows). Relying on a soft contract for the data domain
+  that exists to *observe* skill conventions is circular.
+
+##### Wire-compat statement
+
+The `/agents/ingest` payload accepts fakultative fields per source plus
+a required `source` discriminator. When a source is removed (e.g.
+hook-config is rolled back), the remaining sources continue to write
+under the same payload shape with no protocol change. Adding a fourth
+source is one schema migration (the `CHECK(source IN ...)` enum on
+`agent_tokens.source`) plus an additive value — no breaking change to
+the three existing sources. The agent-spawns table needs no migration
+when a new source joins (the spawn identity is source-independent).
+
+The four read endpoints (`/agents/sessions`, `/agents/tree/{id}`,
+`/agents/tokens`, `/agents/verdicts`) are pure read views — adding or
+removing a source affects the data they return but not their shape.
+The `/agents/tokens` `by_source` breakdown grows a key when a source
+joins and loses a key when a source leaves; consumers tolerate this
+since each `by_source.<name>` block is independent.

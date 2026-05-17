@@ -55,6 +55,7 @@ aktiver-auftrag: "#031 — Phase-2d-S0 ARCH-Vorab (Pipeline-Doku + Schema + ADR-
 - **Status:** offen
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y" auf Phase-2d-Plan-Briefing (Blocks 1-3 in einem Schritt vorgelegt, alle Defaults aus Pre-Briefing + Phase-2a/b/c-Pattern getragen). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` angelegt. Routet S0 an belanna mit Auto-Stop-Pflicht nach S0 für Schema-Approval.
+  - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse feature (Doku-Sprint kein Code), Worker-Spawn ballard für S0-ARCH-Vorab. Auto-Stop nach S0 für Schema-Approval (PFLICHT).
 
 ---
 
