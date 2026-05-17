@@ -407,6 +407,43 @@ html, body {
   max-width: 32rem;
 }
 
+/* ── Agents-tab specifics: per-source token breakdown + verdict pill ── */
+
+.tl-agent-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.tl-agent-source-list li { white-space: nowrap; }
+
+.tl-agent-verdict {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--tl-surface-alt);
+  color: var(--tl-ink);
+}
+.tl-agent-verdict-freigabe   { background: var(--tl-accent-ok);   color: #fff; }
+.tl-agent-verdict-auflagen   { background: var(--tl-accent-warn); color: #1a1a1a; }
+.tl-agent-verdict-rueckgabe  { background: var(--tl-accent-err);  color: #fff; }
+.tl-agent-verdict-eskalation { background: var(--tl-accent-err);  color: #fff; }
+.tl-agent-verdict-none       { background: var(--tl-surface-alt);        color: var(--tl-ink-ghost); }
+
+.tl-agent-lerneffekt {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0 0;
+  padding: 0.4rem;
+  background: var(--tl-surface-alt);
+  border-radius: 0.25rem;
+  max-width: 32rem;
+}
+
 /* ── Stacktrace (crash detail) ─────────────────────────────────────── */
 
 .tl-stacktrace {

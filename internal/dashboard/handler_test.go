@@ -107,11 +107,11 @@ func TestLayoutHandler_SelectActiveTabViaQuery(t *testing.T) {
 		// crashes tab is data-driven (Phase 2c S4); nil-store path
 		// renders the empty crashes panel.
 		{"crashes", `class="tl-tab-panel tl-crashes"`},
-		// S5 polish: the agents stub now renders the wider
-		// "Phase 2d — coming soon" empty-state card. Marker check is
-		// loose-coupled to the headline so a future copy edit doesn't
-		// have to touch this test, only the dedicated agents test
-		// (TestAgentsTabRendersComingSoon) below.
+		// Phase 2d S4: agents tab is now data-driven (no longer the
+		// "coming soon" stub). The nil-store skeleton path renders an
+		// empty agents panel — the wrapper class stays the marker so
+		// the wider S4 surface check lives in the dedicated
+		// TestAgentsTabRendersWithSpawnData test below.
 		{"agents", `class="tl-tab-panel tl-agents"`},
 	}
 	for _, c := range cases {
@@ -173,11 +173,11 @@ func TestTabHandler_RendersBodyWithoutLayout(t *testing.T) {
 		// crashes tab is data-driven (Phase 2c S4); nil-store path
 		// renders the empty crashes panel.
 		{"crashes", `class="tl-tab-panel tl-crashes"`},
-		// S5 polish: the agents stub now renders the wider
-		// "Phase 2d — coming soon" empty-state card. Marker check is
-		// loose-coupled to the headline so a future copy edit doesn't
-		// have to touch this test, only the dedicated agents test
-		// (TestAgentsTabRendersComingSoon) below.
+		// Phase 2d S4: agents tab is now data-driven (no longer the
+		// "coming soon" stub). The nil-store skeleton path renders an
+		// empty agents panel — the wrapper class stays the marker so
+		// the wider S4 surface check lives in the dedicated
+		// TestAgentsTabRendersWithSpawnData test below.
 		{"agents", `class="tl-tab-panel tl-agents"`},
 	}
 	for _, c := range cases {
@@ -292,18 +292,17 @@ func TestStaticHandler_UnknownAsset404s(t *testing.T) {
 	}
 }
 
-// TestAgentsTabRendersComingSoon — S5 acceptance test for the
-// agents-tab stub. Pins three contracts a future copy edit must keep:
+// TestAgentsTabRendersEmptyState — Phase 2d S4 acceptance test for the
+// agents tab when no spawns exist. Pins three contracts:
 //
-//  1. The endpoint returns 200 (no 404 from a missing template, no
-//     500 from a renderTabBody plumbing bug).
-//  2. The body carries the Phase-2d bookmark — both "Phase 2d" and
-//     "coming soon" must appear so the user sees the roadmap context
-//     even if they only skim.
-//  3. The tab-panel wrapper carries the consistent S5 marker class
+//  1. 200 status (no 404 from missing template, no 500 from a
+//     renderTabBody plumbing bug).
+//  2. Empty-state card is rendered with the "No agent spawns yet"
+//     headline so a returning user knows the tab is wired but quiet.
+//  3. The tab-panel wrapper carries the consistent marker class
 //     ("tl-tab-panel tl-agents") so the empty-state styling stays in
-//     sync with the sessions/crashes panels.
-func TestAgentsTabRendersComingSoon(t *testing.T) {
+//     sync with sessions / crashes.
+func TestAgentsTabRendersEmptyState(t *testing.T) {
 	h := newHandler(t)
 	srv := httptest.NewServer(http.HandlerFunc(h.TabHandler))
 	t.Cleanup(srv.Close)
@@ -318,16 +317,12 @@ func TestAgentsTabRendersComingSoon(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	s := string(body)
-	if !strings.Contains(s, "Phase 2d") {
-		t.Errorf("agents body missing 'Phase 2d' marker; body:\n%s", s)
-	}
-	if !strings.Contains(s, "coming soon") {
-		t.Errorf("agents body missing 'coming soon' marker; body:\n%s", s)
+	if !strings.Contains(s, "No agent spawns yet") {
+		t.Errorf("agents body missing empty-state headline; body:\n%s", s)
 	}
 	if !strings.Contains(s, `class="tl-tab-panel tl-agents"`) {
 		t.Errorf("agents body missing 'tl-tab-panel tl-agents' wrapper class")
 	}
-	// Body-only contract: no <html> envelope on the htmx-swap path.
 	if strings.Contains(s, "<html") || strings.Contains(s, "<body") {
 		t.Errorf("tab handler must not emit layout envelope on agents tab")
 	}

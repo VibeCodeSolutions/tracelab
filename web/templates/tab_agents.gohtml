@@ -1,47 +1,166 @@
 {{/*
-  tab_agents.gohtml — Agents tab placeholder (Phase 2c S5 polish).
+  tab_agents.gohtml — Agents tab (Phase 2d S4, data-driven).
 
-  Phase 2c renders this tab as a non-clickable "coming soon" stub so the
-  tab navigation surfaces all four planned tabs from day one rather than
-  hiding the slot until 2d ships. The body documents what 2d will bring
-  so a returning user (or a future Claude-Code session reading the
-  rendered HTML) sees the roadmap without needing the plan file open.
+  Replaces the Phase 2c S5 "coming soon" placeholder with a real
+  visualisation of the three Phase-2d Multi-Ingest domains:
 
-  Phase 2d (see ~/.claude/plans/tracelab-phase-2d-agents.md, drafted
-  after 2c-Closure) adds the KI-Agenten-Stack data domain on top of the
-  app-log domain that 2c covers: a second persistence shape (agent
-  spawn-tree rows), a second crash-equivalent (verdict + Lerneffekt
-  capture), and a cross-domain link (mailbox / crew traffic edges
-  joining the agent-tree to the live-tail event stream).
+    1. Skill-Spawn-Tree — hierarchical list of agent spawns, ordered
+       parent-then-children (BFS), depth visualised via ASCII tree
+       glyphs prefixed to the skill label. Rows beyond depth 0 indent
+       with the "└─" glyph; the rendering deliberately uses plain
+       ASCII so a `curl` of the page stays readable.
+    2. Token-Usage — aggregated input / output / cache counts per
+       spawn plus a per-source breakdown ("sdk-hook", "transcript",
+       "mcp-push") when multiple ingest sources reported. Sources with
+       zero rows are omitted from the breakdown so the operator's eye
+       doesn't have to filter out empty pills.
+    3. Verdict + Lerneffekt — the latest verdict per spawn (rendered
+       in display-cased German: "Freigabe" / "Auflagen" / "Rückgabe"
+       / "Eskalation") plus the Lerneffekt markdown note (rendered as
+       plain text in S4 — full markdown render is out-of-scope).
 
-  Dot value: nil — the template is fully static.
+  Mailbox-edges + cross-references to the live-tail event stream are
+  explicitly S5 scope (the Phase-2d sammel-gate) and not surfaced here.
+
+  Dot value: agentsViewData (agents.go).
 */}}
 <section class="tl-tab-panel tl-agents" data-tab="agents" role="tabpanel">
   <h2>Agents</h2>
 
-  <div class="tl-empty-state tl-coming-soon" role="status">
-    <p class="tl-empty-state-title">Phase 2d — coming soon</p>
-    <p class="tl-empty-state-body">
-      The Agents tab will surface the KI-Agenten-Stack as a second data
-      domain alongside the app-log surfaces of Phase 2c:
-    </p>
-    <ul class="tl-empty-state-list">
-      <li><strong>Skill-Spawn-Tree:</strong> visualises which skills
-        spawned which sub-skills inside a run, who reports up to whom.</li>
-      <li><strong>Token-Usage &amp; Duration:</strong> per-spawn token
-        cost, wall-clock duration, and budget burn-down so the cost of
-        a multi-agent run is visible end-to-end.</li>
-      <li><strong>Verdict &amp; Lerneffekt:</strong> the QS verdict
-        captured per spawn (freigabe / rückgabe / eskalation) plus the
-        post-run Lerneffekt note for the persona memory layer.</li>
-      <li><strong>Mailbox &amp; Crew-Traffic edges:</strong>
-        cross-references between the agent tree and the live-tail event
-        stream so a crashing app surface can be traced back to the agent
-        spawn that ran it.</li>
-    </ul>
-    <p class="tl-empty-state-footer tl-muted">
-      Tracked in <code>~/.claude/plans/tracelab-phase-2d-agents.md</code>
-      after the Phase 2c FF-merge.
-    </p>
-  </div>
+  <form class="tl-agents-controls"
+        hx-get="/dashboard/tab/agents"
+        hx-target="#dashboard-content"
+        hx-swap="innerHTML"
+        hx-trigger="keyup changed delay:300ms from:input[name=project], keyup changed delay:300ms from:input[name=session], submit"
+        hx-push-url="true"
+        onsubmit="return false;">
+    <label for="agents-project">Project</label>
+    <input type="search" id="agents-project" name="project"
+           value="{{.Project}}"
+           placeholder="exact project name"
+           autocomplete="off" spellcheck="false">
+
+    <label for="agents-session">Session</label>
+    <input type="search" id="agents-session" name="session"
+           value="{{.SessionID}}"
+           placeholder="exact session id"
+           autocomplete="off" spellcheck="false">
+
+    {{/* preserve current page+limit so manual reload doesn't reset */}}
+    <input type="hidden" name="page" value="{{.Page}}">
+    <input type="hidden" name="limit" value="{{.Limit}}">
+  </form>
+
+  {{if .ErrorMsg}}
+    <div class="tl-error-card" role="alert">
+      <p class="tl-error-card-title">Partial data — sub-query failed</p>
+      <p>{{.ErrorMsg}}</p>
+    </div>
+  {{end}}
+
+  {{if .Empty}}
+    <div class="tl-empty-state" role="status">
+      <p class="tl-empty-state-title">No agent spawns yet</p>
+      <p class="tl-empty-state-body">
+        As soon as SDK-Hooks, Transcript-Tail, or the MCP-Push tool
+        write to <code>/agents/ingest</code>, spawns will appear here.
+      </p>
+    </div>
+  {{else}}
+    {{/* table-wrap is the S5 polish pattern — narrow viewports scroll
+         inside the wrapper so the page itself never page-scrolls. */}}
+    <div class="tl-table-wrap">
+      <table class="tl-agents-table">
+        <thead>
+          <tr>
+            <th>Skill / Spawn</th>
+            <th>Project</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th class="tl-num">Tokens (in / out)</th>
+            <th>Sources</th>
+            <th>Verdict</th>
+            <th>Lerneffekt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Spawns}}
+            <tr class="tl-agent-row">
+              <td class="tl-mono">
+                {{if .IndentMarker}}<span class="tl-muted">{{.IndentMarker}}</span>{{end}}<strong>{{.Skill}}</strong>
+                <br><span class="tl-muted tl-mono">{{.ID}}</span>
+              </td>
+              <td>{{.Project}}</td>
+              <td>{{.StartedAtHuman}}</td>
+              <td>{{if .EndedAtHuman}}{{.EndedAtHuman}}{{else}}<span class="tl-muted">—</span>{{end}}</td>
+              <td class="tl-num">
+                {{if .TokensRowCount}}
+                  {{.TokensInput}} / {{.TokensOutput}}
+                  {{if or .TokensCacheRead .TokensCacheWrite}}
+                    <br><span class="tl-muted">cache {{.TokensCacheRead}}r / {{.TokensCacheWrite}}w</span>
+                  {{end}}
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .BySource}}
+                  <ul class="tl-agent-source-list">
+                    {{range .BySource}}
+                      <li><span class="tl-mono">{{.Source}}</span>: {{.InputTokens}} / {{.OutputTokens}}{{if or .CacheRead .CacheWrite}} (c {{.CacheRead}}r/{{.CacheWrite}}w){{end}}</li>
+                    {{end}}
+                  </ul>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .Verdict}}
+                  <span class="tl-agent-verdict tl-agent-verdict-{{.Verdict}}">{{.VerdictHuman}}</span>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .LerneffektMD}}
+                  <details>
+                    <summary class="tl-muted">Lerneffekt</summary>
+                    <pre class="tl-agent-lerneffekt">{{.LerneffektMD}}</pre>
+                  </details>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{end}}
+
+  <nav class="tl-pagination" aria-label="Agents pagination">
+    {{if .HasPrev}}
+      <a href="{{.PrevURL}}"
+         hx-get="{{.PrevURL}}"
+         hx-target="#dashboard-content"
+         hx-swap="innerHTML"
+         hx-push-url="true">&laquo; Prev</a>
+    {{else}}
+      <span class="tl-muted">&laquo; Prev</span>
+    {{end}}
+
+    <span class="tl-page-indicator">
+      Page {{.Page}} of {{.PageCount}} &middot; {{.Total}} total
+    </span>
+
+    {{if .HasNext}}
+      <a href="{{.NextURL}}"
+         hx-get="{{.NextURL}}"
+         hx-target="#dashboard-content"
+         hx-swap="innerHTML"
+         hx-push-url="true">Next &raquo;</a>
+    {{else}}
+      <span class="tl-muted">Next &raquo;</span>
+    {{end}}
+  </nav>
 </section>

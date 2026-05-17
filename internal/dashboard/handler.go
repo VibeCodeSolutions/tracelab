@@ -103,6 +103,13 @@ type Handler struct {
 	// back-link to the list view.
 	crashDetailTpl *template.Template
 
+	// agentsTpl renders the Phase 2d S4 agents tab body
+	// (templates/tab_agents.gohtml) with a live data payload. Same
+	// "typed dot, separate ParseFS pass" pattern as sessionsTpl /
+	// crashesTpl — the agents body needs a typed dot (agentsViewData)
+	// rather than the nil-data dispatch used by the static tabs.
+	agentsTpl *template.Template
+
 	staticHandler http.Handler // wraps web.Static for /dashboard/static/*
 }
 
@@ -168,6 +175,14 @@ func NewHandler(version string, log *slog.Logger, st *store.Store) (*Handler, er
 		return nil, fmt.Errorf("dashboard: parse crash-detail tab: %w", err)
 	}
 
+	// Phase 2d S4 — data-driven agents tab. Parsed in its own ParseFS
+	// pass so its dot-value namespace is isolated from the other tabs.
+	agentsTpl, err := template.ParseFS(web.Templates,
+		"templates/tab_agents.gohtml")
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse agents tab: %w", err)
+	}
+
 	// /dashboard/static/* serves the embedded JS/CSS verbatim. Sub-FS
 	// strips the leading "static/" so the URL path maps to file names
 	// directly (e.g. /dashboard/static/htmx.min.js → static/htmx.min.js
@@ -188,6 +203,7 @@ func NewHandler(version string, log *slog.Logger, st *store.Store) (*Handler, er
 		sessionDetailTpl: sessionDetailTpl,
 		crashesTpl:       crashesTpl,
 		crashDetailTpl:   crashDetailTpl,
+		agentsTpl:        agentsTpl,
 		staticHandler:    staticHandler,
 	}, nil
 }
@@ -245,6 +261,13 @@ func (h *Handler) renderTabBody(r *http.Request, slug string) ([]byte, error) {
 			return h.renderCrashesBody(r)
 		}
 		return h.renderEmptyCrashesBody()
+	case "agents":
+		// Phase 2d S4: previously routed through renderTab(slug) which
+		// rendered tab_agents.gohtml against a nil dot value (the
+		// "coming soon" placeholder). S4 replaces that placeholder
+		// with a typed-dot data-driven body — same dispatch pattern as
+		// sessions / crashes above.
+		return h.renderAgentsBody(r)
 	default:
 		return h.renderTab(slug)
 	}
