@@ -1,16 +1,16 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s1-eröffnet — S0 ARCH-Vorab Admin-confirmed (Schema + ADR-013 Accepted + Rebase done `cfb8899` rebased von Branch, gepusht). 30_Wissen/ADR-Konventionen.md angelegt (strikt-leer-Pattern formalisiert). S1 (Skeleton + SDK-Hooks-Ingest) eröffnet — Migration verschieben Top-Level→embed-FS + Test-Counter Bump + ADR-013 Decision-Body finalisieren + Handler /agents/ingest + Tests.
+status: phase-2d-s1-qs-grün — Worker 5 Commits 20c7982..33fecd6 + QS Tuvok qs-20260517-003 freigabe/none/0 Findings + 5 Plus-Befunde. Worker-Highlight: Pre-Hardcoding-Verifikation Hook-Payload-Format via WebFetch widerlegte Initial-Annahme — Tokens NICHT aus Hook, sondern Transcript. S1 fokussiert auf Spawn-Lifecycle, S2 holt Tokens via Transcript-Tail. ADR-013 Accepted (1. Anwendung neuer ADR-Konventionen.md). S2-Auto-Chain-Empfehlung Tuvok — Plan-File hat kein auto-chain-Flag, formal Stop für Admin-Strategie-Entscheidung.
 last-updated: 2026-05-17
-qs-letzter-lauf: qs-20260517-002
+qs-letzter-lauf: qs-20260517-003
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#032 — Phase-2d-S1 Skeleton + SDK-Hooks-Ingest"
+aktiver-auftrag: "#032 — Phase-2d-S1 QS-grün, wartet auf Admin-S2-Auto-Chain-Entscheidung"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -55,10 +55,14 @@ aktiver-auftrag: "#032 — Phase-2d-S1 Skeleton + SDK-Hooks-Ingest"
   - Architektur-Frage: neues `internal/agents/`-Package vs. Erweiterung `internal/dashboard/` → Lead-Entscheidung, kein Stop nötig, dokumentieren
   - Multi-Source-Idempotenz-Konflikt im Test (UNIQUE bricht) → Stop + Schema-Re-Review
 - **Phasen-Status:** S1 ist erste der 3 Ingest-Quellen. Nach S1-QS-grün Auto-Chain zu S2 möglich (Transcript-Tail-Bridge). Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` Sub-Sprint-Map.
-- **Status:** offen
+- **Status:** ✅ QS-grün — wartet auf Admin-S2-Auto-Chain-Entscheidung
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „y auf alle 3" für S0-Auflagen-Bündel (Schema-Approval + Rebase + ADR-Form). Rebase lokal durch (`cfb8899`), Admin Force-Push manuell. `30_Wissen/ADR-Konventionen.md` angelegt (strikt-leer-Pattern für Proposed formalisiert). S1 routet an belanna mit Mandat. Sub-Sprint-Sequenz: S1 SDK-Hooks → S2 Transcript-Tail → S3 MCP-Push → S4 Agents-Tab → S5 Mailbox-Edges + Sammel-Gate.
   - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 6 Deliverables (Migration-Move + Test-Bump + ADR-Finalize + Handler + Hook + Tests). Worker-Spawn ballard. Hook-Format-Verifikation als Pre-Hardcoding-Pflicht markiert (Auto-Stop bei Annahme-Bruch).
+  - 2026-05-17T (Worker-Done) — ballard: 5 Commits `20c7982..33fecd6` auf `feat/phase-2d-agents` gepusht. **Highlight:** Pre-Hardcoding-Verifikation via WebFetch gegen Anthropic-Doku widerlegte Initial-Annahme „Stop liefert Token-Counts" — Tokens kommen aus Transcript, NICHT aus Hook. Hook-Script korrekt nur auf Spawn-Lifecycle (PostToolUse(Task) → spawn-begin, Stop → liveness-verdict:none). Token-Counts via Transcript-Tail in S2. ADR-013 §(a) Coverage-Gap empirisch bestätigt. Auto-Stop-Trigger 1 vermieden (wäre Major-Bug gewesen, Doppel-Counting in S2). 13 Pakete grün, 4 CGO-freie Binaries, E2E-Live-Smoke gegen `127.0.0.1:28766` mit 7 Probes inkl. Multi-Source-Forensik via DB-Direkt-Verify.
+  - 2026-05-17T (QS-Lauf) — tuvok: release-qs-Spawn für 9 Prüfgegenstände (Migration-Apply-Sanity + ADR-Form-Verifikation gegen neue ADR-Konventionen.md + Handler-Coverage + Wire-Stability Phase 2a/b/c).
+  - 2026-05-17T (QS-grün) — tuvok, qs-20260517-003: Status `freigabe` / Schweregrad `none` / 0/0/0 Findings über alle 9 Prüfgegenstände + **5 Plus-Befunde** (Pre-Hardcoding-Verifikation, ADR-013 als 1. Anwendung neuer Konvention Form-konform, +2 Tests über DoD, AgentInsertResult forensik-tauglich, Server-Wire-Disziplin via cfg.Agents-Conditional + 3 Wireup-Tests). S2-Auto-Chain-Empfehlung (Schema vorbereitet, kein Klärungsbedarf, Token-Reserve Tuvok 78%). Cleanup-Hinweis: `/tmp/tracelab-qs032/` Test-Datendir manuell entfernbar (Cosmetic).
+  - 2026-05-17T (Findings-Gate) — chakotay: freigabe/none → Standard-Durchwink. **Auto-Chain-Check:** Plan-File `~/.claude/plans/tracelab-phase-2d-agents.md` hat kein explizites `auto-chain: true`-Frontmatter → Auto-Chain unterdrückt, klassischer routing-abschluss-Bericht an Admin mit S2-Strategie-Frage (sofort starten via Plan-File-Patch oder Reflexions-Pause + Methodik-Lerneffekt Pre-Hardcoding-Verifikation in Worker-Brief-Konventionen.md aufnehmen). WORKLOG-Sync `<dieser-commit>`.
 
 ---
 
