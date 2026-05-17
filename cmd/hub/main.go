@@ -122,6 +122,14 @@ func run() error {
 	if handler == nil {
 		return errors.New("http: New returned nil (auth token empty?)")
 	}
+	// Phase 2d S4 — slot the /agents/{sessions,tree,tokens,verdicts}
+	// read endpoints in front of the chi router. The dispatcher
+	// intercepts only its four GET prefixes and passes everything else
+	// (including POST /agents/ingest) through to the chi handler. This
+	// keeps internal/http/ untouched per the #035 cross-check-scope
+	// brief — the read surface is an additive overlay rather than an
+	// in-place router edit.
+	handler = agentHandler.AgentsReadMux(cfg.Auth.Token, handler)
 	// NOTE: WriteTimeout on the underlying http.Server is intentionally
 	// not propagated here because it would also apply to long-lived
 	// /tail websocket connections (after Hijack the deadline still ticks
