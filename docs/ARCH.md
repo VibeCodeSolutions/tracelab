@@ -1471,12 +1471,12 @@ captures the union.
 
 #### ADR-013: Multi-Ingest pattern for the agent-observability domain
 
-> **Status:** Proposed (S0 ARCH-Vorab — awaits Admin-Confirm; promoted
-> to Accepted in S1 once approved, before any handler code is written).
-> Lead recommendation in this ADR Body, Decision block holds the
-> Lead-Empfehlung as the chosen direction explicitly subject to
-> Admin-Confirm — same Decision-Block-Disziplin pattern as ADR-007
-> (P2b-S2) and ADR-012 (P2c-S1).
+> **Status:** Accepted (confirmed 2026-05-17 via Admin-y-auf-alle-3 nach
+> chakotay-routing-bestätigung). Promoted from Proposed at the open of
+> S1, before any handler code is written. Form follows the new
+> `XBrain/30_Wissen/ADR-Konventionen.md` transition-pattern (Proposed →
+> Accepted: status header bumped, Decision body filled with chosen
+> variant + date + confirm source).
 
 ##### Context
 
@@ -1535,12 +1535,18 @@ event's data (token counts, verdict text).
 
 ##### Decision
 
-**(d) Multi-Ingest with three concurrent sources.**
+**(d) Multi-Ingest 3 Quellen (SDK-Hooks + Transcript-Tail + MCP-Push)**
+— gewählt am 2026-05-17, confirmed durch Admin via
+chakotay-routing-bestätigung.
 
-Lead recommendation Ballard P2d-S0, subject to Admin-Confirm. The four
-event-class-to-primary-source mappings in §Architecture §Tripwire
-pattern are part of this decision (which source is authoritative for
-which event class; which source acts as fallback under what trigger).
+Begründung: Robustheit gegen Hook-Lücken ((a) unzureichend),
+Vollständigkeit via Transcript-Tail ((b) unzureichend ohne
+Push-Atomarität), Explicitness bei MCP-Push ((c) unzureichend ohne
+Hook-Coverage). Idempotenz via spawn-ID + UNIQUE-Tupel macht die 3
+Quellen kollisionsfrei. Die vier Event-Class-zu-Primary-Source-Mappings
+in §Architecture §Tripwire pattern sind Teil dieser Decision (welche
+Quelle ist authoritative für welche Event-Klasse; welche Quelle agiert
+als Fallback unter welchem Trigger).
 
 ##### Consequences
 
