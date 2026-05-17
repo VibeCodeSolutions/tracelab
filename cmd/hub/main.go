@@ -143,6 +143,40 @@ func run() error {
 	)
 	logger.Info("http server listening", slog.String("addr", addr))
 
+	// Optional Phase-2d transcript-tail bridge (ADR-013 §Multi-Ingest,
+	// second of three ingest sources). Spawned as its own goroutine so
+	// the tail-loop does not block start-up; shutdown is cooperative
+	// via a cancel context, awaited in the shutdown block below to
+	// preserve "all bridges stopped before hub.Close" invariant.
+	var (
+		transcriptCancel context.CancelFunc
+		transcriptDone   chan struct{}
+	)
+	if cfg.Agents.Transcript.Enabled {
+		tbr, err := agents.NewTranscriptBridge(agents.TranscriptBridgeDeps{
+			Store:        st,
+			Logger:       logger,
+			ProjectsRoot: cfg.Agents.Transcript.ProjectsRoot,
+			PollInterval: time.Duration(cfg.Agents.Transcript.PollIntervalMs) * time.Millisecond,
+		})
+		if err != nil {
+			return fmt.Errorf("agents transcript bridge: %w", err)
+		}
+		logger.Info("agents transcript-tail enabled",
+			slog.String("projects_root", tbr.ProjectsRoot()),
+			slog.Int("poll_interval_ms", cfg.Agents.Transcript.PollIntervalMs),
+		)
+		tCtx, tCancel := context.WithCancel(context.Background())
+		transcriptCancel = tCancel
+		transcriptDone = make(chan struct{})
+		go func() {
+			defer close(transcriptDone)
+			if err := tbr.Run(tCtx); err != nil {
+				logger.Error("agents transcript-tail exited with error", slog.Any("err", err))
+			}
+		}()
+	}
+
 	// Optional config-driven adb-logcat bridge. Owned by the bridge
 	// manager, started via adbMgr.Start so the cfg.ADB.Enabled path goes
 	// through the same lifecycle as bridges launched on demand via
@@ -199,6 +233,19 @@ func run() error {
 	// hijacked /tail conns (srv.Shutdown before hub.Close).
 	adbMgr.Close()
 	logger.Info("adb bridges stopped")
+
+	if transcriptCancel != nil {
+		transcriptCancel()
+		// Wait for the tail-loop to drain so we don't race the store
+		// close below. The loop returns within one poll-interval of
+		// the cancel; a 5 s safety net catches a wedged file walker.
+		select {
+		case <-transcriptDone:
+		case <-time.After(5 * time.Second):
+			logger.Warn("agents transcript-tail did not stop within 5s")
+		}
+		logger.Info("agents transcript-tail stopped")
+	}
 
 	hub.Close()
 	logger.Info("websocket hub closed")
