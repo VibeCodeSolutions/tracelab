@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s2-qs-grün — Worker 5 Commits 9d6727b..017b8e8 + QS Tuvok qs-20260517-004 freigabe/none/0 Findings über 10 Prüfgegenstände + 7 Plus-Befunde. Worker-Highlight (2. Major-Bug-Verhinderer via Pre-Hardcoding-Verifikation): 3 Worker-Brief-Annahmen widerlegt via Read auf reale Session-JSONLs (sessionId≠tracelab-session, Subagent-Pfad, toolUseResult-Verdict-Mechanik). Pattern damit 2× empirisch belegt → Promotion-Trigger für Worker-Brief-Konventionen.md. S3-Auto-Chain (MCP-Push) empfohlen aber Plan-File ohne auto-chain-Flag → formal Stop für Admin-Strategie-Entscheidung (S3 sofort vs Methodik-Sweep zuerst).
+status: phase-2d-s3-eröffnet — S2 #033 QS-grün gemerged in Sync 8bace1f. Admin „S3 sofort (Auto-Chain)". S3 = MCP-Push (dritte und letzte der 3 Ingest-Quellen) eröffnet: `agent_event`-Tool im `tracelab-mcp` + Hub-Endpoint-Wiring. Methodik-Sweep Worker-Brief-Konventionen.md als Folge-Auftrag nach S3-Merge. Pre-Hardcoding-Verifikation-Pflicht für MCP-Tool-Signature + Idempotenz-Verhalten.
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260517-004
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,7 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#033 — Phase-2d-S2 QS-grün, wartet auf Admin-S3-Strategie-Entscheidung"
+aktiver-auftrag: "#034 — Phase-2d-S3 MCP-Push (agent_event-Tool)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,48 @@ aktiver-auftrag: "#033 — Phase-2d-S2 QS-grün, wartet auf Admin-S3-Strategie-E
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #034 — Tracelab Phase-2d-S3 — MCP-Push (dritte und letzte der 3 Ingest-Quellen)
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („S3 sofort (Auto-Chain)" via AskUserQuestion nach S2-QS-grün-Bericht) → Chakotay (S3 routet an belanna, Plan-File-Patch unterdrückt — Admin-Trigger ersetzt Flag, Methodik-Sweep als Folge-Auftrag nach S3-Merge vertagt) → belanna
+- **Auftrag:** S3 = **MCP-Push** (dritte und letzte der 3 Ingest-Quellen). Neues `agent_event`-MCP-Tool im `tracelab-mcp`-Server, das von Claude Code aktiv aufgerufen wird, um Spawn-/Token-/Verdict-Events zu pushen. Persistiert via dieselbe `/agents/ingest`-Pipeline mit `source="mcp-push"`. Damit sind alle 3 Quellen (SDK-Hooks/Transcript-Tail/MCP-Push) live → Multi-Ingest-Coverage komplett, Phase-2d-Sammel-Gate-ready für S5.
+- **Branch:** `feat/phase-2d-agents` (HEAD `8bace1f`, S0+S1+S2 + Findings-Gate-Syncs drauf)
+- **DoD S3:**
+  - **`agent_event`-MCP-Tool in `cmd/mcp/`** (oder `internal/mcp/`):
+    - Tool-Schema: `agent_event` mit Parametern entsprechend `/agents/ingest`-Payload (spawn_id, parent_id, skill, project, started_at, ended_at, tokens, verdict, mailbox_edges — alles optional außer spawn_id+source-Eindeutigkeit)
+    - Tool-Handler: `source="mcp-push"` hardcoded gesetzt vor POST an `/agents/ingest` (HTTP self-call, weil MCP-Server separat von Hub läuft)
+    - Bearer-Auth via gleichem Token (config-Lookup oder env-var)
+    - Multi-Tool-Pattern: das ist Tool #7 in tracelab-mcp (nach adb_devices/start/stop, sessions_list, tail_since, crashes_list — siehe Phase 2b ADR-007)
+  - **MCP-Tool-Registration in `cmd/mcp/main.go`** analog zu den 6 bestehenden Tools — gleiche Form, gleiche Auth-Mechanik
+  - **Hub-Endpoint /agents/ingest** ist von S1 bereits live — kein neuer Endpoint nötig, MCP-Tool ist Push-Caller
+  - **3-Source-Cross-Verifikation (PFLICHT):** E2E-Test ODER manueller Smoke gegen Live-Daemon:
+    - SDK-Hook + Transcript-Tail + MCP-Push beide schreiben für gleichen spawn_id → 1 Row in agent_spawns, 3 Rows in agent_tokens (jeder source separate Row via UNIQUE-Tupel-Mechanik), Forensik-Response zeigt Per-Source-Counts
+    - Cross-Source-Race: parallele Inserts aus allen 3 Quellen → keine Schema-Violations, alle 3 sources koexistieren
+  - **Tests:**
+    - MCP-Tool-Tests: Smoke, Idempotenz, Bad-Auth, Schema-Validation
+    - Cross-Source-Test (Schema-Level oder Integration): 3-Source-Koexistenz
+  - **ARCH.md-Erweiterung:** Sektion „Phase 2d — Agent-Ingest Layer" → MCP-Push-Sub-Sektion mit Tool-Schema + Format-Mapping-Tabelle (analog zu Transcript-Tail-Sektion aus S2)
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — MCP-Tool + Tests + 3-Source-Cross-Verifikation)
+  - QS-Spawn tuvok (Klasse release-qs — 3-Source-Cross-Verifikation + Wire-Stability + Tool-Surface-Konsistenz mit ADR-007)
+  - **Cross-Check-Scope (18. Anwendung):** Erlaubt: `cmd/mcp/main.go` + `internal/mcp/` (neue Files für agent_event-Tool), `docs/ARCH.md` (MCP-Push-Erweiterung), `docs/WORKLOG.md` (Verlauf). **0 Bytes Diff in S1/S2-Paketen** (`internal/agents/{handler,payload,transcript}.go`, `internal/store/agents.go`, `internal/config/`, `cmd/hub/main.go`) — MCP-Push ist additiv über bestehenden `/agents/ingest`-Endpoint.
+- **PRE-HARDCODING-VERIFIKATION (PFLICHT — 3. Anwendung):**
+  - MCP-Tool-Schema-Konvention: anschauen wie die 6 bestehenden Tools in `cmd/mcp/` strukturiert sind (z.B. `crashes_list`-Tool aus P2b-S6 als Vorbild), Tool-Registration-Pattern + Param-Validation + Response-Form übernehmen
+  - mcp-go-Library-API: gleiche Version wie Phase 2b (v0.45.0 — siehe go.mod), Tool-Definition-Form muss konsistent sein
+  - Idempotenz-Semantik: MCP-Tool ruft `/agents/ingest` per HTTP self-call → Response-Body mit Counts kommt zurück → Tool-Response soll diese Counts forwarden (Forensik-Forward)
+- **Auto-Stop:**
+  - MCP-Tool-Schema-Konflikt mit ADR-007 (Tool-Surface-Cut) → Stop + Klärung
+  - 3-Source-Cross-Verifikation findet Schema-Konflikt (z.B. UNIQUE-Tupel-Race) → Stop + Schema-Re-Review (würde ADR-013 auflösen)
+  - mcp-go-Version-Konflikt → Stop + Klärung
+- **Phasen-Status:** S3 ist 3. von 3 Ingest-Quellen — nach S3-QS-grün ist Multi-Ingest-Coverage **komplett**. S4 (Agents-Tab funktional) wäre nächster Schritt, dann S5 (Mailbox-Edges + Sammel-Gate). **Methodik-Sweep** für `30_Wissen/Worker-Brief-Konventionen.md` (Backlog-Hygiene + Pre-Hardcoding-Verifikation als 2-Klauseln-Sweep) ist als Folge-Auftrag nach S3-Merge vermerkt.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „S3 sofort" via AskUserQuestion. Routet S3 an belanna mit Pre-Hardcoding-Verifikation-Pflicht (3. Anwendung — diesmal für MCP-Tool-Schema-Konvention).
 
 ---
 
