@@ -34,3 +34,24 @@ token = "CHANGEME"
 enabled       = false       # set to true once `adb devices` shows your target
 device_serial = ""          # REQUIRED when enabled=true (no implicit "first device")
 tag_filter    = ""          # optional single-tag filter, e.g. "MyApp"
+
+# Optional Phase-2d agent-observability sources. Each source is independent;
+# enable any subset. All sources write into the same agent_* tables and are
+# dedup'd at the schema layer (UNIQUE-tuple on agent_tokens preserves
+# per-source forensics — see ADR-013).
+#
+# [agents.transcript] — Phase 2d S2 transcript-tail bridge.
+# When enabled, the hub polls every *.jsonl file under projects_root for new
+# lines (plus the per-session subagents/agent-*.jsonl files), parses each
+# Claude-Code transcript record, and persists spawn / token / verdict events
+# with source="transcript". Coexists with the SDK-hook source from S1 — the
+# UNIQUE tuple on agent_tokens(spawn_id, ts, source) keeps both rows for
+# per-source disagreement debugging.
+#
+# The field mapping was empirically verified against real transcripts; see
+# docs/ARCH.md §Phase 2d §Transcript-Tail for the schema-to-JSONL mapping.
+#
+# [agents.transcript]
+# enabled          = false               # set true to start tailing
+# projects_root    = "~/.claude/projects" # default; ~ is expanded at start-up
+# poll_interval_ms = 1000                # default 1 s tail cycle

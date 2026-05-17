@@ -99,3 +99,61 @@ func TestCLIConfig_ApplyDefaults_Idempotent(t *testing.T) {
 		t.Errorf("ApplyDefaults not idempotent: first=%+v second=%+v", first, cli)
 	}
 }
+
+func TestLoad_ParsesAgentsTranscriptSection(t *testing.T) {
+	t.Parallel()
+	path := writeTOML(t, `
+[auth]
+token = "abc"
+
+[agents.transcript]
+enabled = true
+projects_root = "/tmp/test-projects"
+poll_interval_ms = 250
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Agents.Transcript.Enabled {
+		t.Errorf("Transcript.Enabled = false, want true")
+	}
+	if cfg.Agents.Transcript.ProjectsRoot != "/tmp/test-projects" {
+		t.Errorf("ProjectsRoot = %q", cfg.Agents.Transcript.ProjectsRoot)
+	}
+	if cfg.Agents.Transcript.PollIntervalMs != 250 {
+		t.Errorf("PollIntervalMs = %d, want 250", cfg.Agents.Transcript.PollIntervalMs)
+	}
+}
+
+func TestLoad_AgentsSectionMissing_AppliesDefaults(t *testing.T) {
+	t.Parallel()
+	// A hub TOML without any [agents.*] block must still load, with
+	// the transcript bridge disabled but defaults applied.
+	path := writeTOML(t, `
+[auth]
+token = "abc"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Agents.Transcript.Enabled {
+		t.Errorf("Transcript.Enabled = true, want false (off by default)")
+	}
+	if cfg.Agents.Transcript.ProjectsRoot != DefaultTranscriptProjectsRoot {
+		t.Errorf("ProjectsRoot default not applied, got %q", cfg.Agents.Transcript.ProjectsRoot)
+	}
+	if cfg.Agents.Transcript.PollIntervalMs != DefaultTranscriptPollIntervalMs {
+		t.Errorf("PollIntervalMs default not applied, got %d", cfg.Agents.Transcript.PollIntervalMs)
+	}
+}
+
+func TestTranscriptConfig_applyDefaults_KeepsExplicitValues(t *testing.T) {
+	t.Parallel()
+	tc := TranscriptConfig{Enabled: true, ProjectsRoot: "/x", PollIntervalMs: 50}
+	tc.applyDefaults()
+	if tc.ProjectsRoot != "/x" || tc.PollIntervalMs != 50 || !tc.Enabled {
+		t.Errorf("applyDefaults must not overwrite explicit values, got %+v", tc)
+	}
+}
