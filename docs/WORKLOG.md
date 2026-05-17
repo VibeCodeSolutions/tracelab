@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s1-qs-grün — Worker 5 Commits 20c7982..33fecd6 + QS Tuvok qs-20260517-003 freigabe/none/0 Findings + 5 Plus-Befunde. Worker-Highlight: Pre-Hardcoding-Verifikation Hook-Payload-Format via WebFetch widerlegte Initial-Annahme — Tokens NICHT aus Hook, sondern Transcript. S1 fokussiert auf Spawn-Lifecycle, S2 holt Tokens via Transcript-Tail. ADR-013 Accepted (1. Anwendung neuer ADR-Konventionen.md). S2-Auto-Chain-Empfehlung Tuvok — Plan-File hat kein auto-chain-Flag, formal Stop für Admin-Strategie-Entscheidung.
+status: phase-2d-s2-eröffnet — S1 #032 QS-grün gemerged in Sync ea01fc7. Admin-Auto-Chain-Entscheidung „S2 sofort". S2 = Transcript-Tail-Bridge (zweite der 3 Ingest-Quellen) eröffnet — Hub tailt ~/.claude/projects/*/*.jsonl analog adb-bridge, parsed Spawn/Token/Verdict-Events. Pre-Hardcoding-Verifikation-Pflicht für Transcript-Format vor Hardcoding (Lerneffekt aus S1).
 last-updated: 2026-05-17
 qs-letzter-lauf: qs-20260517-003
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,7 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#032 — Phase-2d-S1 QS-grün, wartet auf Admin-S2-Auto-Chain-Entscheidung"
+aktiver-auftrag: "#033 — Phase-2d-S2 Transcript-Tail-Bridge"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,44 @@ aktiver-auftrag: "#032 — Phase-2d-S1 QS-grün, wartet auf Admin-S2-Auto-Chain-
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #033 — Tracelab Phase-2d-S2 — Transcript-Tail-Bridge (zweite der 3 Ingest-Quellen)
+
+- **Timestamp:** 2026-05-17T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („S2 sofort (Auto-Chain)" via AskUserQuestion nach S1-QS-grün-Bericht) → Chakotay (S2 routet an belanna, kein Plan-File-Patch nötig — Admin-Trigger ersetzt auto-chain-Flag) → belanna
+- **Auftrag:** S2 = **Transcript-Tail-Bridge** (zweite der 3 Ingest-Quellen). Hub tailt `~/.claude/projects/*/*.jsonl` analog `internal/adb/`-logcat-Bridge, parsed Spawn/Token/Verdict-Events aus den JSONL-Streams, persistiert via dieselbe `/agents/ingest`-Pipeline mit `source="transcript"`. Coverage-Lücke aus S1 (Tokens-Counts) wird damit geschlossen.
+- **Branch:** `feat/phase-2d-agents` (HEAD `ea01fc7`, S1 + Findings-Gate-Sync, sauber)
+- **DoD S2:**
+  - **Transcript-Tail-Bridge in `internal/agents/transcript.go` (oder eigenes Package `internal/transcript/`):**
+    - Tail-Loop analog `internal/adb/LogcatStream` (POSIX-Cancel-Watcher-Pattern, SIGTERM→3s→SIGKILL für ADB-Bridge-Pattern als Vorlage)
+    - Multi-File-Watcher (alle `*.jsonl`-Files unter `~/.claude/projects/<projekt-slug>/`)
+    - JSONL-Stream-Parsing (line-by-line, gegen Mid-Line-Append robust)
+    - Mapping: Tool-Use-Events → spawn-begin, Sub-Agent-Returns → verdict, Usage-Felder → tokens (mit source="transcript")
+    - Hub-Bridge-Goroutine: parsed Events → POST `/agents/ingest` (HTTP local, oder direkter store-Aufruf wenn im selben Hub-Prozess)
+  - **Config-Erweiterung:** `cfg.Agents.Transcript.Enabled` + `cfg.Agents.Transcript.ProjectsRoot` (Default `~/.claude/projects/`)
+  - **Idempotenz-Test mit S1:** wenn SDK-Hook + Transcript-Tail beide für gleichen Spawn schreiben → korrekt 2 Rows in agent_tokens (verschiedener `source`), 1 Row in agent_spawns (UNIQUE auf id)
+  - **Tests:** Tail-Parsing (JSONL → Events), Bridge-Loop (Mock-File mit append), Multi-Source-Koexistenz mit SDK-Hook-Source
+  - **Sample-Fixtures:** `scripts/transcript-sample.jsonl` als Test-Fixture (Worker liest echtes Sample-Transcript für Format-Verifikation)
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — Tail-Bridge + Parser + Bridge-Goroutine + Tests)
+  - QS-Spawn tuvok (Klasse release-qs nach Code-Done — Multi-Source-Idempotenz + Wire-Stability + Format-Sanity)
+  - **Cross-Check-Scope (17. Anwendung):** Erlaubt: `internal/agents/transcript.go` oder `internal/transcript/`-Package neu, `internal/config/` (cfg.Agents.Transcript), `cmd/hub/main.go` (Bridge-Lifecycle-Wireup), `docs/ARCH.md` (Transcript-Tail-Sektion ergänzen), `docs/WORKLOG.md`, `scripts/transcript-sample.jsonl`. 0 Bytes Diff in S1-Paketen (`internal/agents/handler.go|payload.go`, `internal/store/agents.go` — bleiben unverändert, Transcript-Source ist additiv).
+- **PRE-HARDCODING-VERIFIKATION (PFLICHT, gleiches Pattern wie S1):**
+  - Transcript-JSONL-Format ist NICHT öffentlich dokumentiert — Worker MUSS Sample-Transcripts in `~/.claude/projects/-home-kaik-Projekte-tracelab/*.jsonl` lesen (gerade laufende Session ist eines davon) und Felder verifizieren BEVOR Mapping hardcoded wird
+  - Felder zu verifizieren: spawn-Marker (Tool-Use mit `type:"tool_use"` und `name:"Task"`?), token-Counts (Usage-Field-Position pro Message?), verdict-Strings (Sub-Agent-Return-Format?)
+  - **Auto-Stop** falls Format-Annahme nicht haltbar — Bericht mit `status: eskalation` und Optionen-Vorschlag
+- **Auto-Stop sonst:**
+  - Multi-Source-Konflikt mit S1 (z.B. agent_spawns hat 2 Rows statt 1 weil PK-Logik versagt) → Stop + Schema-Re-Review
+  - Architektur-Frage: separates `internal/transcript/`-Package vs. Erweiterung `internal/agents/` → Lead-Entscheidung, dokumentieren
+  - Tail-Pattern bricht (z.B. JSONL-Format wechselt mid-stream) → Stop + Klärung
+- **Phasen-Status:** S2 ist 2. von 3 Ingest-Quellen. Nach S2-QS-grün → S3 (MCP-Push) Auto-Chain möglich falls Token-Budget reicht. Sammel-Gate kommt in S5.
+- **Status:** offen
+- **Verlauf:**
+  - 2026-05-17T (Eröffnung) — chakotay: Admin „S2 sofort (Auto-Chain)" via AskUserQuestion. Plan-File-Patch unterdrückt (Admin-Trigger ersetzt Flag). Routet S2 an belanna mit Pre-Hardcoding-Verifikation-Pflicht für Transcript-JSONL-Format (gleiches Pattern wie S1-Hook-Format-Verifikation).
 
 ---
 
