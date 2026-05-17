@@ -1574,6 +1574,124 @@ A spawn that both sources see is persisted as:
   not the same domain as `sessions.id`; populating the FK would always
   break. S4-S5 will add a separate cross-domain join layer.
 
+### MCP-Push bridge (S3 implementation)
+
+The MCP-Push path is the third and last of the three ingest sources,
+live since Phase 2d S3 (Auftrag #034). It is a new MCP tool —
+`agent_event` — registered in the `tracelab-mcp` server alongside the
+six Phase-2b tools (sessions_list, tail_since, adb_devices, adb_start,
+adb_stop, crashes_list). The tool forwards its arguments to the
+existing `POST /agents/ingest` endpoint via a new
+`client.AgentsIngest` method; the hub endpoint and the four
+`store.InsertAgent*` methods from S1 are unchanged.
+
+This is the worker-active source: the running skill (Lead /
+specialist / QS) calls `agent_event` itself, atomically with the
+lifecycle event it reports. It is the primary source for spawn-end,
+verdict, and mailbox-edge events per the tripwire table above —
+falling back to the transcript-tail (S2) and the SDK-hook (S1) when
+the worker forgets to push.
+
+#### Tool schema
+
+Required envelope: at least one of `spawn` / `tokens` / `verdicts` /
+`mailbox_edges`. The handler hardcodes `source="mcp-push"` before
+forwarding — a caller cannot impersonate another ingest path by
+smuggling a different value.
+
+| Tool argument | Type | Required | Notes |
+|---|---|---|---|
+| `spawn` | object | required iff no other section | Mirrors `internal/agents.SpawnPayload`: id (ULID-shape 26-char string), parent_id?, skill, started_at (unix-nano), ended_at? (unix-nano), project, session_ref?. |
+| `tokens` | array | optional | One entry per accounting point: spawn_id, input_tokens, output_tokens, cache_read, cache_write, ts (unix-nano). |
+| `verdicts` | array | optional | One entry per QS verdict: spawn_id, verdict (∈ freigabe\|auflagen\|rueckgabe\|eskalation\|none), lerneffekt_md?, ts (unix-nano). |
+| `mailbox_edges` | array | optional | One entry per cross-spawn edge: from_spawn_id, to_spawn_id, edge_type (∈ spawn\|return\|escalate\|delegate), ts (unix-nano). |
+
+The `source` discriminator is NOT a tool parameter — the tool's
+identity IS the source, hardcoded server-side (Pre-Hardcoding
+discipline §3 below).
+
+#### Idempotency — HTTP-forwarded forensic counts
+
+Each invocation maps 1:1 to a single `POST /agents/ingest` call. The
+hub's per-table forensic response (`{"ingested": {"spawns":N,
+"tokens":N, "verdicts":N, "mailbox_edges":N}}`) is forwarded verbatim
+as the tool's JSON-encoded TextContent. The contract is therefore:
+
+- First call with a fresh `spawn_id` / `ts` / source-tuple ⇒ counts > 0.
+- Second call with the same identifiers ⇒ counts = 0 (UNIQUE-tuple
+  INSERT OR IGNORE collapses the duplicate at the storage layer —
+  same mechanism the S1 handler and S2 bridge rely on).
+
+A caller can therefore audit "my retry was harmless" without a
+separate read-back: the {0,0,0,0} response is canonical and stable.
+
+#### Three-source coexistence — empirically pinned
+
+`TestAgentsIngestThreeSourceCoexistence` in
+`internal/agents/three_source_test.go` drives all three ingest paths
+through the real handler + sqlite store with the same `spawn_id` +
+`ts` but different token counts, asserting:
+
+| Schema assertion | What it pins |
+|---|---|
+| `agent_spawns` row count for `spawn_id` = **1** | PK collision (INSERT OR IGNORE on agent_spawns.id) collapses 3 writers' spawn rows to one. |
+| `agent_tokens` row count for `(spawn_id, ts)` = **3** | UNIQUE(spawn_id, ts, source) keeps one row per source — sdk-hook 100/200, transcript 110/220, mcp-push 105/210 coexist side-by-side. |
+| `source` CHECK constraint | All three discriminators pass — `CHECK (source IN ('sdk-hook','transcript','mcp-push'))` in `0003_agents_schema.up.sql` accepts each. |
+
+This is the live closure of ADR-013 §Consequences
+§Per-source-forensic-breakdown: a triaging operator querying
+`/agents/tokens?spawn_id=<X>` sees three rows with disagreeing counts
+side-by-side, rather than the last-writer-wins erasure of a
+single-source design.
+
+#### Pre-Hardcoding-Verifikation (AUFTRAG #034, third application)
+
+Four assumptions in the worker brief were verified against the live
+Phase-2d S1/S2 code before any S3 code was written:
+
+1. **Time unit — unix-nano, NOT unix-ms.** The brief said `unix-ms`.
+   `internal/agents/payload.go`'s `validate()` rejects anything that
+   fails the "unix-nano > 0" gate (see `spawn.started_at required
+   (unix-nano > 0)`); `internal/store/agents.go` calls `UnixNano()`
+   unconditionally. Hardcoding ms would have produced timestamps 1000×
+   off — the tool description and the test fixtures spell out
+   unix-nano so an LLM caller cannot regress.
+2. **`tokens` / `verdicts` are top-level arrays, not embedded structs
+   in `spawn`.** The brief's `tokens (struct ...)` phrasing would have
+   produced a 400 from the server's validate(). The tool schema models
+   them as top-level optional arrays, matching `IngestPayload` exactly.
+3. **`client.AgentsIngest` did not exist** — Phase 2d S1 + S2 wrote
+   into the hub from in-process (handler + direct store call). The
+   MCP server runs out-of-process and needs an HTTP path. New method
+   added additively to `internal/client/agents.go`, same `doRequest`
+   plumbing as `client.CrashesList`.
+4. **mcp-go v0.45.0 (pinned in go.mod since P2b-S1)** is unchanged.
+   The tool uses `BindArguments` to unmarshal the nested envelope into
+   `AgentEventInput` — same path mcp-go's own
+   `TestCallToolRequest_BindArgumentsWithRawJSON` exercises in v0.45.0.
+
+The third application of the Pre-Hardcoding-Verifikation pattern
+(after S1 WebFetch-against-hooks-doku and S2 sample-JSONL-read) again
+caught two would-be Major-Bugs (#1 + #2 above).
+
+#### Limitations
+
+- **MCP-Push requires an active `tracelab-mcp` daemon.** Same operator
+  constraint as the SDK-hook path requires the `agent-hook.sh`
+  script — both need the worker side to be wired up. The transcript-
+  tail bridge (S2) is the only zero-config-side path.
+- **No nested-schema enforcement at dispatch.** mcp-go v0.45.0's
+  `WithObject` / `WithArray` describe the shape but do not validate
+  nested fields at the MCP dispatch layer (verified against
+  `mcp-go@v0.45.0/mcp/tools_test.go`). The real safety net is the
+  server-side `validate()` plus the CHECK constraints — the tool
+  schema is documentation for the LLM caller, not a wire-level
+  firewall.
+- **Source discriminator hardcoded.** A worker that wants to push
+  with `source="transcript"` cannot do so via this tool — by design.
+  The transcript-source is the bridge's reserved word, and impersonation
+  would corrupt the per-source forensic breakdown.
+
 #### ADR-013: Multi-Ingest pattern for the agent-observability domain
 
 > **Status:** Accepted (confirmed 2026-05-17 via Admin-y-auf-alle-3 nach
