@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -235,10 +236,411 @@ func (s *Store) InsertAgentMailboxEdge(ctx context.Context, e AgentMailboxEdge) 
 	return n, nil
 }
 
-// ensureFKError is a small ergonomic helper for callers that want to
-// distinguish "spawn parent not found" from "real DB problem". SQLite
-// reports FK violations as a generic error string — we surface it via
-// errors.Is(err, sql.ErrNoRows) for callers that want to translate
-// to 404. Today no caller needs this, but the hook is reserved for
-// the read-endpoints in S3+.
-var _ = sql.ErrNoRows // keep the import live for future read methods
+// -----------------------------------------------------------------------------
+// Phase 2d S4 — Read-surface for the dashboard "Agents" tab.
+//
+// Five additive read methods drive the four /agents/* read endpoints
+// (see internal/agents/read.go) plus the dashboard tab body
+// (internal/dashboard/agents.go):
+//
+//   - ListAgentSpawns          — paginated newest-first list of spawns,
+//                                optional project / session filters
+//   - CountAgentSpawns         — total matching ListAgentSpawns filter
+//   - AgentSpawnByID           — single-spawn lookup (sql.ErrNoRows when unknown)
+//   - ListAgentSpawnTree       — root + all transitive descendants
+//   - AgentTokensBySpawn       — all token-rows (per-source preserved)
+//   - AgentVerdictsBySpawn     — all verdict-rows
+//
+// All time fields are stored as unix-nano (column type INTEGER); the
+// methods convert to/from time.Time at the boundary, same convention as
+// sessions / events / crashes.
+//
+// Tree-reconstruction strategy: application-level walk over a flat
+// SELECT (root + every row whose parent chain reaches root). SQLite's
+// `WITH RECURSIVE` works, but a typical agent tree is 10-100 nodes —
+// the flat-then-walk approach keeps the SQL simple, the test trivial,
+// and avoids a CTE-syntax dependency on a future store-layer migration.
+// Document choice in docs/ARCH.md §Phase 2d Read-Surface.
+
+// AgentSpawnRow is one agent_spawns row returned by the read methods.
+// ParentID / EndedAt / SessionRef are pointers so callers can
+// distinguish "not set" from zero-value. All times are time.Time;
+// caller decides on rendering.
+type AgentSpawnRow struct {
+	ID         string
+	ParentID   *string
+	Skill      string
+	StartedAt  time.Time
+	EndedAt    *time.Time
+	Project    string
+	SessionRef *string
+}
+
+// ListAgentSpawnsOpts bundles optional filter / pagination parameters
+// for ListAgentSpawns and CountAgentSpawns. Zero values map to "no
+// filter, no offset, default limit, newest first". The sort is hard-
+// coded started_at DESC for now — the agents tab is a triage surface,
+// reverse-chronological is the natural reading order, so the typed
+// SessionSort/CrashSort enum machinery isn't worth it yet.
+type ListAgentSpawnsOpts struct {
+	Limit            int
+	Offset           int
+	FilterProject    string
+	FilterSessionRef string
+}
+
+// ListAgentSpawns returns up to opts.Limit spawn rows ordered newest
+// first (started_at DESC, id DESC as tiebreaker). Empty result is
+// `nil, nil` — same convention as the session/crash list reads.
+//
+// limit <= 0 falls back to a 50 default. opts.Offset < 0 is clamped
+// to 0 to spare the SQL layer a defensive check.
+func (s *Store) ListAgentSpawns(ctx context.Context, opts ListAgentSpawnsOpts) ([]AgentSpawnRow, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	const baseSelect = `
+		SELECT id, parent_id, skill, started_at, ended_at, project, session_ref
+		FROM agent_spawns
+	`
+	var (
+		query string
+		args  []any
+	)
+	switch {
+	case opts.FilterProject != "" && opts.FilterSessionRef != "":
+		query = baseSelect + ` WHERE project = ? AND session_ref = ?
+			ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{opts.FilterProject, opts.FilterSessionRef, limit, offset}
+	case opts.FilterProject != "":
+		query = baseSelect + ` WHERE project = ?
+			ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{opts.FilterProject, limit, offset}
+	case opts.FilterSessionRef != "":
+		query = baseSelect + ` WHERE session_ref = ?
+			ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{opts.FilterSessionRef, limit, offset}
+	default:
+		query = baseSelect + ` ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{limit, offset}
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list agent spawns: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentSpawnRow
+	for rows.Next() {
+		row, err := scanAgentSpawnRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list agent spawns rows: %w", err)
+	}
+	return out, nil
+}
+
+// CountAgentSpawns returns the total number of spawn rows matching the
+// same filters ListAgentSpawns honours. Used by the dashboard tab to
+// drive pagination counters.
+func (s *Store) CountAgentSpawns(ctx context.Context, filterProject, filterSessionRef string) (int64, error) {
+	var (
+		query string
+		args  []any
+	)
+	switch {
+	case filterProject != "" && filterSessionRef != "":
+		query = `SELECT COUNT(*) FROM agent_spawns WHERE project = ? AND session_ref = ?`
+		args = []any{filterProject, filterSessionRef}
+	case filterProject != "":
+		query = `SELECT COUNT(*) FROM agent_spawns WHERE project = ?`
+		args = []any{filterProject}
+	case filterSessionRef != "":
+		query = `SELECT COUNT(*) FROM agent_spawns WHERE session_ref = ?`
+		args = []any{filterSessionRef}
+	default:
+		query = `SELECT COUNT(*) FROM agent_spawns`
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count agent spawns: %w", err)
+	}
+	return n, nil
+}
+
+// AgentSpawnByID returns the spawn row for the given id, or
+// sql.ErrNoRows when no spawn matches. The caller is expected to
+// translate sql.ErrNoRows → HTTP 404.
+func (s *Store) AgentSpawnByID(ctx context.Context, id string) (AgentSpawnRow, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, parent_id, skill, started_at, ended_at, project, session_ref
+		FROM agent_spawns
+		WHERE id = ?
+	`, id)
+	res, err := scanAgentSpawnRowFromRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentSpawnRow{}, sql.ErrNoRows
+		}
+		return AgentSpawnRow{}, fmt.Errorf("store: agent spawn by id: %w", err)
+	}
+	return res, nil
+}
+
+// ListAgentSpawnTree returns the root spawn plus every transitive
+// descendant whose parent chain reaches rootID. The returned slice is
+// ordered breadth-first from the root (root first, then children, then
+// grand-children, …), with siblings sorted by started_at ASC. This
+// matches the natural reading order in a tree view — parents before
+// children, oldest sibling first.
+//
+// Strategy: load the whole project's spawn rows in one query (in
+// practice 10-100 rows per project; an index on project keeps this
+// cheap), then walk parent→children pointers in-memory. Avoids the
+// SQLite-WITH-RECURSIVE syntax footprint and keeps the unit test
+// trivial. If a future deployment ships realistic projects with >10k
+// spawns per project, revisit via ADR — but for the single-user dev
+// surface this is more than adequate.
+//
+// rootID must be non-empty. An unknown id returns sql.ErrNoRows.
+func (s *Store) ListAgentSpawnTree(ctx context.Context, rootID string) ([]AgentSpawnRow, error) {
+	if rootID == "" {
+		return nil, fmt.Errorf("store: list agent spawn tree: root id required")
+	}
+
+	// Step 1: look up the root to (a) confirm existence and (b) learn
+	// which project to scope the children query to. Scoping by project
+	// keeps the working set bounded even on a shared NTFS DB with many
+	// concurrent agent projects.
+	root, err := s.AgentSpawnByID(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: pull every spawn in the same project. We could narrow by
+	// "descendants only" via WITH RECURSIVE, but at this dataset size
+	// a flat query + in-memory walk is cheaper to write and test.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, parent_id, skill, started_at, ended_at, project, session_ref
+		FROM agent_spawns
+		WHERE project = ?
+		ORDER BY started_at ASC, id ASC
+	`, root.Project)
+	if err != nil {
+		return nil, fmt.Errorf("store: list agent spawn tree query: %w", err)
+	}
+	defer rows.Close()
+
+	byID := make(map[string]AgentSpawnRow)
+	childrenByParent := make(map[string][]string)
+	for rows.Next() {
+		r, err := scanAgentSpawnRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		byID[r.ID] = r
+		if r.ParentID != nil && *r.ParentID != "" {
+			childrenByParent[*r.ParentID] = append(childrenByParent[*r.ParentID], r.ID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list agent spawn tree rows: %w", err)
+	}
+
+	// Step 3: BFS walk from root. Siblings are already in started_at ASC
+	// order thanks to the SELECT ORDER BY.
+	out := make([]AgentSpawnRow, 0, len(byID))
+	queue := []string{rootID}
+	visited := make(map[string]bool, len(byID))
+	for len(queue) > 0 {
+		head := queue[0]
+		queue = queue[1:]
+		if visited[head] {
+			// Defensive: parent_id is FK-self-referential and the schema
+			// would allow a malformed cycle (no CHECK against it). A
+			// visited-set keeps the walk terminating even in that case.
+			continue
+		}
+		visited[head] = true
+		row, ok := byID[head]
+		if !ok {
+			// head is outside the project scope (or unknown) — skip but
+			// don't error. The root was already verified by AgentSpawnByID.
+			continue
+		}
+		out = append(out, row)
+		queue = append(queue, childrenByParent[head]...)
+	}
+	return out, nil
+}
+
+// AgentTokenRow is one agent_tokens row returned by the read methods.
+// Source is preserved so the caller can render per-source breakdowns
+// (multi-ingest forensic view, ADR-013 §Consequences).
+type AgentTokenRow struct {
+	ID           int64
+	SpawnID      string
+	InputTokens  int64
+	OutputTokens int64
+	CacheRead    int64
+	CacheWrite   int64
+	TS           time.Time
+	Source       string
+}
+
+// AgentTokensBySpawn returns every token-row for the given spawn,
+// ordered ascending by ts (and id as tiebreaker). All three sources
+// are returned interleaved — the caller aggregates and slices by
+// source as needed. Empty result is `nil, nil`.
+func (s *Store) AgentTokensBySpawn(ctx context.Context, spawnID string) ([]AgentTokenRow, error) {
+	if spawnID == "" {
+		return nil, fmt.Errorf("store: agent tokens by spawn: id required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, spawn_id, input_tokens, output_tokens, cache_read, cache_write, ts, source
+		FROM agent_tokens
+		WHERE spawn_id = ?
+		ORDER BY ts ASC, id ASC
+	`, spawnID)
+	if err != nil {
+		return nil, fmt.Errorf("store: agent tokens by spawn: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentTokenRow
+	for rows.Next() {
+		var r AgentTokenRow
+		var tsNano int64
+		if err := rows.Scan(&r.ID, &r.SpawnID, &r.InputTokens, &r.OutputTokens,
+			&r.CacheRead, &r.CacheWrite, &tsNano, &r.Source); err != nil {
+			return nil, fmt.Errorf("store: scan agent token: %w", err)
+		}
+		r.TS = time.Unix(0, tsNano)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: agent tokens by spawn rows: %w", err)
+	}
+	return out, nil
+}
+
+// AgentVerdictRow is one agent_verdicts row returned by the read methods.
+// LerneffektMD is empty when the source row carried NULL — the database
+// distinguishes NULL from empty string, but the wire shape collapses
+// both to the empty string (consumers care only about "is there a note").
+type AgentVerdictRow struct {
+	ID           int64
+	SpawnID      string
+	Verdict      string
+	LerneffektMD string
+	TS           time.Time
+}
+
+// AgentVerdictsBySpawn returns every verdict row attached to the spawn,
+// ordered ascending by ts (and id as tiebreaker). Empty result is
+// `nil, nil`.
+func (s *Store) AgentVerdictsBySpawn(ctx context.Context, spawnID string) ([]AgentVerdictRow, error) {
+	if spawnID == "" {
+		return nil, fmt.Errorf("store: agent verdicts by spawn: id required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, spawn_id, verdict, lerneffekt_md, ts
+		FROM agent_verdicts
+		WHERE spawn_id = ?
+		ORDER BY ts ASC, id ASC
+	`, spawnID)
+	if err != nil {
+		return nil, fmt.Errorf("store: agent verdicts by spawn: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentVerdictRow
+	for rows.Next() {
+		var r AgentVerdictRow
+		var tsNano int64
+		var lerneffekt sql.NullString
+		if err := rows.Scan(&r.ID, &r.SpawnID, &r.Verdict, &lerneffekt, &tsNano); err != nil {
+			return nil, fmt.Errorf("store: scan agent verdict: %w", err)
+		}
+		r.TS = time.Unix(0, tsNano)
+		if lerneffekt.Valid {
+			r.LerneffektMD = lerneffekt.String
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: agent verdicts by spawn rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanAgentSpawnRow extracts one AgentSpawnRow from a *sql.Rows cursor.
+// Shared between ListAgentSpawns and ListAgentSpawnTree.
+func scanAgentSpawnRow(rows *sql.Rows) (AgentSpawnRow, error) {
+	var (
+		r          AgentSpawnRow
+		parentID   sql.NullString
+		startedNano int64
+		endedNano  sql.NullInt64
+		sessionRef sql.NullString
+	)
+	if err := rows.Scan(&r.ID, &parentID, &r.Skill, &startedNano, &endedNano, &r.Project, &sessionRef); err != nil {
+		return AgentSpawnRow{}, fmt.Errorf("store: scan agent spawn: %w", err)
+	}
+	r.StartedAt = time.Unix(0, startedNano)
+	if parentID.Valid {
+		v := parentID.String
+		r.ParentID = &v
+	}
+	if endedNano.Valid {
+		t := time.Unix(0, endedNano.Int64)
+		r.EndedAt = &t
+	}
+	if sessionRef.Valid {
+		v := sessionRef.String
+		r.SessionRef = &v
+	}
+	return r, nil
+}
+
+// scanAgentSpawnRowFromRow is the *sql.Row variant of scanAgentSpawnRow
+// — used by single-row lookups (AgentSpawnByID) which receive *sql.Row
+// rather than *sql.Rows. The two scan APIs are nearly identical but
+// .Scan errors map differently (Row returns sql.ErrNoRows directly).
+func scanAgentSpawnRowFromRow(row *sql.Row) (AgentSpawnRow, error) {
+	var (
+		r           AgentSpawnRow
+		parentID    sql.NullString
+		startedNano int64
+		endedNano   sql.NullInt64
+		sessionRef  sql.NullString
+	)
+	if err := row.Scan(&r.ID, &parentID, &r.Skill, &startedNano, &endedNano, &r.Project, &sessionRef); err != nil {
+		return AgentSpawnRow{}, err
+	}
+	r.StartedAt = time.Unix(0, startedNano)
+	if parentID.Valid {
+		v := parentID.String
+		r.ParentID = &v
+	}
+	if endedNano.Valid {
+		t := time.Unix(0, endedNano.Int64)
+		r.EndedAt = &t
+	}
+	if sessionRef.Valid {
+		v := sessionRef.String
+		r.SessionRef = &v
+	}
+	return r, nil
+}
