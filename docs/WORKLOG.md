@@ -1,16 +1,16 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s3-eröffnet — S2 #033 QS-grün gemerged in Sync 8bace1f. Admin „S3 sofort (Auto-Chain)". S3 = MCP-Push (dritte und letzte der 3 Ingest-Quellen) eröffnet: `agent_event`-Tool im `tracelab-mcp` + Hub-Endpoint-Wiring. Methodik-Sweep Worker-Brief-Konventionen.md als Folge-Auftrag nach S3-Merge. Pre-Hardcoding-Verifikation-Pflicht für MCP-Tool-Signature + Idempotenz-Verhalten.
+status: phase-2d-s3-qs-grün — Worker 5 Commits 81c9954..877bade + QS Tuvok schlanker Re-Spawn (qs-20260517-005) freigabe/none/0 Findings + 6 Plus-Befunde. **Multi-Ingest-Coverage KOMPLETT** (alle 3 Sources sdk-hook/transcript/mcp-push live + test-pinned via TestAgentsIngestThreeSourceCoexistence). Worker-Highlight: Pre-Hardcoding-Verifikation 3. Anwendung widerlegte 2 Briefing-Annahmen (unix-ms vs unix-NANO + sub-structs vs Top-Level-Arrays). 1. Tuvok-Spawn war 9h heartbeat-fail (Org-Limit) → schlanker Re-Spawn (Klasse standard, Token 200k, Stub-First) in 139s/64.7k Token durch — L26-Stub-First empirisch validiert. S4 (Agents-Tab funktional) wartet auf Admin-Entscheidung (S4 sofort vs 3-Klauseln-Methodik-Sweep Worker-Brief-Konventionen.md zuerst).
 last-updated: 2026-05-17
-qs-letzter-lauf: qs-20260517-004
+qs-letzter-lauf: qs-20260517-005
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#034 — Phase-2d-S3 MCP-Push (agent_event-Tool)"
+aktiver-auftrag: "#034 — Phase-2d-S3 QS-grün, wartet auf Admin-S4-Strategie-Entscheidung"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -64,9 +64,16 @@ aktiver-auftrag: "#034 — Phase-2d-S3 MCP-Push (agent_event-Tool)"
   - 3-Source-Cross-Verifikation findet Schema-Konflikt (z.B. UNIQUE-Tupel-Race) → Stop + Schema-Re-Review (würde ADR-013 auflösen)
   - mcp-go-Version-Konflikt → Stop + Klärung
 - **Phasen-Status:** S3 ist 3. von 3 Ingest-Quellen — nach S3-QS-grün ist Multi-Ingest-Coverage **komplett**. S4 (Agents-Tab funktional) wäre nächster Schritt, dann S5 (Mailbox-Edges + Sammel-Gate). **Methodik-Sweep** für `30_Wissen/Worker-Brief-Konventionen.md` (Backlog-Hygiene + Pre-Hardcoding-Verifikation als 2-Klauseln-Sweep) ist als Folge-Auftrag nach S3-Merge vermerkt.
-- **Status:** offen
+- **Status:** ✅ QS-grün — wartet auf Admin-S4-Strategie-Entscheidung
 - **Verlauf:**
   - 2026-05-17T (Eröffnung) — chakotay: Admin „S3 sofort" via AskUserQuestion. Routet S3 an belanna mit Pre-Hardcoding-Verifikation-Pflicht (3. Anwendung — diesmal für MCP-Tool-Schema-Konvention).
+  - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Klasse sprint, ballard.
+  - 2026-05-17T (Worker-Done) — ballard: 5 Commits `81c9954..877bade`. **Pre-Hardcoding-Verifikation 3. Anwendung — 2 Major-Bugs verhindert:** (a) Briefing `started_at: int64 unix-ms` widerlegt → Wire-Reality unix-NANO (1000× off vermieden), (b) Briefing tokens/verdict als sub-structs widerlegt → Wire-Reality Top-Level-Arrays (400-Reject via DisallowUnknownFields vermieden). `TestAgentsIngestThreeSourceCoexistence` pinnt 3-Source-Forensik (1 spawn-row PK-Collapse + 3 token-rows UNIQUE-Tupel). 13 Pakete grün, 4 CGO-freie Binaries.
+  - 2026-05-17T (QS-Lauf 1, heartbeat-fail) — tuvok-1: release-qs-Spawn → 9h ohne Output, Org-Limit-Trigger. Markiert als verloren.
+  - 2026-05-17T (Admin-Entscheidung Recovery) — Admin „Tuvok-Re-Spawn klein" via AskUserQuestion.
+  - 2026-05-17T (QS-Lauf 2, Re-Spawn) — belanna: schlanker Tuvok-Re-Spawn (Klasse standard statt release-qs, Token-Budget 200k statt 500k, Heartbeat 5min, Stub-First-Pflicht laut L26).
+  - 2026-05-17T (QS-grün) — tuvok-2, qs-20260517-005: Status `freigabe` / Schweregrad `none` / 0 Findings über alle 5 Prüfgegenstände + **6 Plus-Befunde** (Tool-Schema vollständig + source-Identity nicht spoof-bar, Counts-Forward verbatim, AgentsIngest doRequest-Pattern, 3-Source-Cross-Test korrekt, Scope-Disziplin S1/S2-Owner-Files 0 Bytes, 15/15 neue Tests grün). 64.7k Token / 139s — L26-Stub-First-Disziplin empirisch validiert.
+  - 2026-05-17T (Findings-Gate) — chakotay: freigabe/none → Standard-Durchwink. **Multi-Ingest-Coverage KOMPLETT** (alle 3 Sources live). **3-Klauseln-Methodik-Promotion JETZT hart fällig** für `30_Wissen/Worker-Brief-Konventionen.md`: (1) Backlog-Hygiene aus #030, (2) Pre-Hardcoding-Verifikation aus #032/#033/#034 (3× konsekutiv), (3) L26-Stub-First für QS-Re-Spawns aus heutigem Stall-Recovery. **Auto-Chain-Check:** Plan-File ohne `auto-chain: true` → Auto-Chain unterdrückt, routing-abschluss-Bericht an Admin mit S4-Strategie-Frage. WORKLOG-Sync `<dieser-commit>`.
   - 2026-05-17T (Annahme + Worker-Spawn) — belanna: Auftrag angenommen, Klasse sprint mit 5 Deliverables (Pre-Hardcoding-Verifikation + agent_event-Tool + Tests + 3-Source-Cross-Verifikation + ARCH-Erweiterung). Worker-Spawn ballard mit Pre-Hardcoding-Verifikation als Pflicht-Erststep (3. Anwendung — MCP-Tool-Schema-Konvention).
   - 2026-05-17T (Pre-Hardcoding-Verifikation, ballard) — 4 Annahmen geprüft: (a) `started_at`-Briefing sagt `unix-ms`, Wire-Reality (handler/payload.go + store.go) = **unix-NANO** → Tool-Schema muss `ns`-Konvention spiegeln (sonst 1000× falsche Zeitstempel); (b) `tokens`/`verdict` sind **Top-Level-Arrays** in IngestPayload, NICHT embedded sub-structs in Spawn → Tool-Schema muss optional `tokens[]`/`verdicts[]` als eigenständige Param-Arrays modellieren; (c) mcp-go v0.45.0 in go.mod bestätigt, kein Upgrade; (d) `client.AgentsIngest`-Methode fehlt → wird additiv in `internal/client/agents.go` ergänzt (idiomatisch über `doRequest` statt rohem HTTP — wie `client.CrashesList`). Alle 4 Befunde lösen kein Auto-Stop aus, werden in Implementierung berücksichtigt.
   - 2026-05-17T (Worker-Done, ballard) — 4 logische Commits `81c9954..0f64ff6` auf `feat/phase-2d-agents`: (1) WORKLOG-Annahme + Pre-Hardcoding-Befunde, (2) `client.AgentsIngest` + 6 Tests, (3) `agent_event`-MCP-Tool + 7 Tests + main.go-Wireup, (4) 3-Source-Cross-Verifikation `TestAgentsIngestThreeSourceCoexistence` (sdk-hook+transcript+mcp-push 1×spawn + 3×token-rows mit Per-Source-Forensik) + ARCH.md „MCP-Push bridge (S3 implementation)"-Sektion mit Tool-Schema-Tabelle + Idempotenz-via-Counts + 3-Source-Coexistenz-Proof + Pre-Hardcoding-Walkthrough + Limitations. `go vet ./...` clean, `go test -race -count=1 ./...` über 13 Pakete grün (13 neue Tests in client+mcp+agents, 0 Regressions), `go mod tidy` Diff=0, `make hub mcp mcp-windows hub-windows` 4 CGO-freie Binaries (ELF+PE32+). Cross-Check-Scope 18. Anwendung sauber — verbotene Pfade (S1/S2-Pakete + Phase 1/2a/2c-Pakete) 0 Bytes Diff. Touch-Set strikt erlaubt: `cmd/mcp/{main,main_test,agent_event,agent_event_test}.go`, `internal/client/{agents,agents_test}.go`, `internal/agents/three_source_test.go` (additiv — handler/payload/transcript unberührt), `docs/{ARCH,WORKLOG}.md`. Status: erledigt — Branch push-ready für Belanna→Tuvok release-qs-Gate. Multi-Ingest-Coverage damit **komplett** (3 von 3 Sources live).
