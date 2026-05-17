@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 )
 
 // AgentIngestSpawn is one agent_spawns row in the wire envelope.
@@ -102,6 +103,214 @@ type AgentIngestCounts struct {
 // per-source breakdown, etc.).
 type AgentIngestResponse struct {
 	Ingested AgentIngestCounts `json:"ingested"`
+}
+
+// AgentSpawn is one agent_spawns row in the read-surface wire shape.
+// Mirrors internal/agents.SpawnWire. StartedAt / EndedAt are unix-nano.
+// Phase 2d S4 — pairs with AgentsSessions / AgentsTree.
+type AgentSpawn struct {
+	ID         string `json:"id"`
+	ParentID   string `json:"parent_id,omitempty"`
+	Skill      string `json:"skill"`
+	StartedAt  int64  `json:"started_at"`
+	EndedAt    *int64 `json:"ended_at,omitempty"`
+	Project    string `json:"project"`
+	SessionRef string `json:"session_ref,omitempty"`
+}
+
+// AgentSpawnsList is the response body for GET /agents/sessions.
+// Total reflects the unfiltered count for the active filter, NOT just
+// the rows returned in this page — callers can drive their own paging
+// off it without an extra COUNT roundtrip.
+type AgentSpawnsList struct {
+	Spawns []AgentSpawn `json:"spawns"`
+	Total  int64        `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
+}
+
+// AgentTreeNode is one spawn in the BFS-ordered tree response, plus a
+// pre-computed depth so the consumer can indent without re-walking
+// the parent chain. Mirrors internal/agents.TreeNodeWire.
+type AgentTreeNode struct {
+	AgentSpawn
+	Depth int `json:"depth"`
+}
+
+// AgentTree is the response body for GET /agents/tree/{spawn_id}.
+type AgentTree struct {
+	Root  string          `json:"root"`
+	Nodes []AgentTreeNode `json:"nodes"`
+}
+
+// AgentTokenRow is one agent_tokens row in the read wire shape. ts is
+// unix-nano. Source is preserved so per-source breakdowns survive the
+// HTTP boundary.
+type AgentTokenRow struct {
+	ID           int64  `json:"id"`
+	SpawnID      string `json:"spawn_id"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	CacheRead    int64  `json:"cache_read"`
+	CacheWrite   int64  `json:"cache_write"`
+	TS           int64  `json:"ts"`
+	Source       string `json:"source"`
+}
+
+// AgentTokenSourceSum is one per-source aggregate inside AgentTokenTotals.
+type AgentTokenSourceSum struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	CacheRead    int64 `json:"cache_read"`
+	CacheWrite   int64 `json:"cache_write"`
+	RowCount     int64 `json:"row_count"`
+}
+
+// AgentTokenTotals is the aggregated counts shape on /agents/tokens.
+// Total is the cross-source sum; BySource is keyed by canonical source
+// ("sdk-hook" / "transcript" / "mcp-push"). Sources with zero rows are
+// absent from the map.
+type AgentTokenTotals struct {
+	InputTokens  int64                          `json:"input_tokens"`
+	OutputTokens int64                          `json:"output_tokens"`
+	CacheRead    int64                          `json:"cache_read"`
+	CacheWrite   int64                          `json:"cache_write"`
+	BySource     map[string]AgentTokenSourceSum `json:"by_source"`
+}
+
+// AgentTokens is the response body for GET /agents/tokens?spawn_id=…
+type AgentTokens struct {
+	SpawnID string           `json:"spawn_id"`
+	Tokens  []AgentTokenRow  `json:"tokens"`
+	Totals  AgentTokenTotals `json:"totals"`
+}
+
+// AgentVerdictRow is one agent_verdicts row. ts is unix-nano;
+// LerneffektMD is omitted when empty on the wire.
+type AgentVerdictRow struct {
+	ID           int64  `json:"id"`
+	SpawnID      string `json:"spawn_id"`
+	Verdict      string `json:"verdict"`
+	LerneffektMD string `json:"lerneffekt_md,omitempty"`
+	TS           int64  `json:"ts"`
+}
+
+// AgentVerdicts is the response body for GET /agents/verdicts?spawn_id=…
+type AgentVerdicts struct {
+	SpawnID  string            `json:"spawn_id"`
+	Verdicts []AgentVerdictRow `json:"verdicts"`
+}
+
+// AgentsSessions calls the hub's GET /agents/sessions endpoint.
+// limit <= 0 means "use the hub default" (currently 50). offset < 0
+// is treated as 0. project / sessionRef are optional exact-match
+// filters; pass "" to omit.
+func (c *Client) AgentsSessions(ctx context.Context, project, sessionRef string, limit, offset int) (AgentSpawnsList, error) {
+	q := buildAgentsSessionsQuery(project, sessionRef, limit, offset)
+	path := "/agents/sessions"
+	if q != "" {
+		path += "?" + q
+	}
+	var resp AgentSpawnsList
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     path,
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentSpawnsList{}, err
+	}
+	if resp.Spawns == nil {
+		resp.Spawns = []AgentSpawn{}
+	}
+	return resp, nil
+}
+
+// AgentsTree calls the hub's GET /agents/tree/{spawn_id} endpoint.
+// Unknown spawn id surfaces as ErrNotFound (via the HTTPError 404 →
+// sentinel mapping in doRequest).
+func (c *Client) AgentsTree(ctx context.Context, spawnID string) (AgentTree, error) {
+	if spawnID == "" {
+		return AgentTree{}, errors.New("client: AgentsTree requires a non-empty spawn_id")
+	}
+	var resp AgentTree
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     "/agents/tree/" + url.PathEscape(spawnID),
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentTree{}, err
+	}
+	if resp.Nodes == nil {
+		resp.Nodes = []AgentTreeNode{}
+	}
+	return resp, nil
+}
+
+// AgentsTokens calls the hub's GET /agents/tokens?spawn_id=… endpoint.
+func (c *Client) AgentsTokens(ctx context.Context, spawnID string) (AgentTokens, error) {
+	if spawnID == "" {
+		return AgentTokens{}, errors.New("client: AgentsTokens requires a non-empty spawn_id")
+	}
+	var resp AgentTokens
+	q := url.Values{"spawn_id": []string{spawnID}}
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     "/agents/tokens?" + q.Encode(),
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentTokens{}, err
+	}
+	if resp.Tokens == nil {
+		resp.Tokens = []AgentTokenRow{}
+	}
+	if resp.Totals.BySource == nil {
+		resp.Totals.BySource = map[string]AgentTokenSourceSum{}
+	}
+	return resp, nil
+}
+
+// AgentsVerdicts calls the hub's GET /agents/verdicts?spawn_id=… endpoint.
+func (c *Client) AgentsVerdicts(ctx context.Context, spawnID string) (AgentVerdicts, error) {
+	if spawnID == "" {
+		return AgentVerdicts{}, errors.New("client: AgentsVerdicts requires a non-empty spawn_id")
+	}
+	var resp AgentVerdicts
+	q := url.Values{"spawn_id": []string{spawnID}}
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     "/agents/verdicts?" + q.Encode(),
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentVerdicts{}, err
+	}
+	if resp.Verdicts == nil {
+		resp.Verdicts = []AgentVerdictRow{}
+	}
+	return resp, nil
+}
+
+// buildAgentsSessionsQuery constructs the optional query string for
+// AgentsSessions. Empty / zero / negative values are omitted entirely
+// so the hub falls back to its own defaults.
+func buildAgentsSessionsQuery(project, sessionRef string, limit, offset int) string {
+	q := url.Values{}
+	if project != "" {
+		q.Set("project", project)
+	}
+	if sessionRef != "" {
+		q.Set("session_ref", sessionRef)
+	}
+	if limit > 0 {
+		q.Set("limit", itoa(limit))
+	}
+	if offset > 0 {
+		q.Set("offset", itoa(offset))
+	}
+	return q.Encode()
 }
 
 // AgentsIngest calls the hub's POST /agents/ingest endpoint and

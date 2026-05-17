@@ -175,3 +175,182 @@ func TestAgentsIngest_ServerError(t *testing.T) {
 		t.Errorf("err=%v, want ErrServerError", err)
 	}
 }
+
+// ─── Phase 2d S4 — Read-method tests ───────────────────────────────────
+
+// TestAgentsSessions_HappyPath drives a full GET round-trip: the client
+// requests /agents/sessions with paging knobs, the hub echoes a typed
+// envelope, the client returns AgentSpawnsList with non-nil spawns.
+func TestAgentsSessions_HappyPath(t *testing.T) {
+	var gotPath, gotMethod string
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path + "?" + r.URL.RawQuery
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"spawns":[
+				{"id":"a1","skill":"ballard","started_at":1700000000,"project":"tracelab"}
+			],
+			"total":1,"limit":50,"offset":0
+		}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsSessions(context.Background(), "tracelab", "", 50, 0)
+	if err != nil {
+		t.Fatalf("AgentsSessions: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method=%q, want GET", gotMethod)
+	}
+	if !contains(gotPath, "project=tracelab") {
+		t.Errorf("query missing project filter: %q", gotPath)
+	}
+	if !contains(gotPath, "limit=50") {
+		t.Errorf("query missing limit: %q", gotPath)
+	}
+	if resp.Total != 1 || len(resp.Spawns) != 1 {
+		t.Errorf("resp=%+v, want total=1 spawns=1", resp)
+	}
+	if resp.Spawns[0].Skill != "ballard" {
+		t.Errorf("first spawn skill=%q", resp.Spawns[0].Skill)
+	}
+}
+
+// TestAgentsSessions_EmptyResponseNonNil — a hub returning `"spawns":null`
+// must surface as an empty slice (NOT nil), mirroring the CrashesList
+// posture.
+func TestAgentsSessions_EmptyResponseNonNil(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"spawns":null,"total":0,"limit":50,"offset":0}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsSessions(context.Background(), "", "", 0, 0)
+	if err != nil {
+		t.Fatalf("AgentsSessions: %v", err)
+	}
+	if resp.Spawns == nil {
+		t.Error("Spawns must be non-nil even on empty hub response")
+	}
+}
+
+func TestAgentsTree_HappyPath(t *testing.T) {
+	var gotPath string
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"root":"a1","nodes":[
+			{"id":"a1","skill":"belanna","started_at":1700000000,"project":"tracelab","depth":0},
+			{"id":"a2","parent_id":"a1","skill":"ballard","started_at":1700000001,"project":"tracelab","depth":1}
+		]}`))
+	})
+	c, _ := newTestServer(t, h)
+	tree, err := c.AgentsTree(context.Background(), "a1")
+	if err != nil {
+		t.Fatalf("AgentsTree: %v", err)
+	}
+	if gotPath != "/agents/tree/a1" {
+		t.Errorf("path=%q, want /agents/tree/a1", gotPath)
+	}
+	if tree.Root != "a1" {
+		t.Errorf("root=%q, want a1", tree.Root)
+	}
+	if len(tree.Nodes) != 2 {
+		t.Fatalf("nodes len=%d, want 2", len(tree.Nodes))
+	}
+	if tree.Nodes[1].Depth != 1 {
+		t.Errorf("child depth=%d, want 1", tree.Nodes[1].Depth)
+	}
+}
+
+func TestAgentsTree_EmptyID(t *testing.T) {
+	h := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("server should not be called on empty id")
+	})
+	c, _ := newTestServer(t, h)
+	if _, err := c.AgentsTree(context.Background(), ""); err == nil {
+		t.Error("expected error for empty spawn_id")
+	}
+}
+
+func TestAgentsTokens_AggregatesAndBreakdown(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hub-side path should encode spawn_id correctly.
+		if !contains(r.URL.RawQuery, "spawn_id=spawn1") {
+			t.Errorf("query missing spawn_id: %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"spawn_id":"spawn1",
+			"tokens":[
+				{"id":1,"spawn_id":"spawn1","input_tokens":100,"output_tokens":50,"cache_read":0,"cache_write":0,"ts":1700000000,"source":"sdk-hook"},
+				{"id":2,"spawn_id":"spawn1","input_tokens":200,"output_tokens":100,"cache_read":0,"cache_write":0,"ts":1700000001,"source":"transcript"}
+			],
+			"totals":{
+				"input_tokens":300,"output_tokens":150,"cache_read":0,"cache_write":0,
+				"by_source":{
+					"sdk-hook":{"input_tokens":100,"output_tokens":50,"cache_read":0,"cache_write":0,"row_count":1},
+					"transcript":{"input_tokens":200,"output_tokens":100,"cache_read":0,"cache_write":0,"row_count":1}
+				}
+			}
+		}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsTokens(context.Background(), "spawn1")
+	if err != nil {
+		t.Fatalf("AgentsTokens: %v", err)
+	}
+	if resp.Totals.InputTokens != 300 || resp.Totals.OutputTokens != 150 {
+		t.Errorf("totals=%+v", resp.Totals)
+	}
+	if len(resp.Totals.BySource) != 2 {
+		t.Errorf("by_source keys=%d, want 2", len(resp.Totals.BySource))
+	}
+	if resp.Totals.BySource["sdk-hook"].InputTokens != 100 {
+		t.Errorf("sdk-hook breakdown wrong: %+v", resp.Totals.BySource["sdk-hook"])
+	}
+}
+
+func TestAgentsVerdicts_HappyPath(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"spawn_id":"x","verdicts":[
+			{"id":1,"spawn_id":"x","verdict":"freigabe","ts":1700000000}
+		]}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsVerdicts(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("AgentsVerdicts: %v", err)
+	}
+	if len(resp.Verdicts) != 1 || resp.Verdicts[0].Verdict != "freigabe" {
+		t.Errorf("verdicts=%+v", resp.Verdicts)
+	}
+}
+
+func TestAgentsReadEndpoints_Unauthorized(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `unauthorized`, http.StatusUnauthorized)
+	})
+	c, _ := newTestServer(t, h)
+	if _, err := c.AgentsSessions(context.Background(), "", "", 0, 0); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("AgentsSessions err=%v, want ErrUnauthorized", err)
+	}
+	if _, err := c.AgentsTokens(context.Background(), "x"); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("AgentsTokens err=%v", err)
+	}
+}
+
+// contains is a tiny test-only helper to avoid pulling in strings just
+// for substring checks scattered through the response-shape assertions.
+func contains(haystack, needle string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
