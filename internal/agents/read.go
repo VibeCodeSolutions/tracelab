@@ -127,6 +127,29 @@ type tokensResp struct {
 	Totals  TokenTotals    `json:"totals"`
 }
 
+// EdgeRowWire is one agent_mailbox_edges row in the JSON wire shape.
+// ts is unix-nano; the four FK + enum fields are eagerly populated
+// (the schema rejects nullable columns on this table).
+//
+// Phase 2d S5 — pairs with /agents/edges.
+type EdgeRowWire struct {
+	ID          int64  `json:"id"`
+	FromSpawnID string `json:"from_spawn_id"`
+	ToSpawnID   string `json:"to_spawn_id"`
+	EdgeType    string `json:"edge_type"`
+	TS          int64  `json:"ts"`
+}
+
+// edgesResp is the response body for GET /agents/edges?spawn_id=…
+// Two slices — `in` (rows pointing AT the spawn) and `out` (rows pointing
+// AWAY from the spawn). The wire shape is symmetric so the dashboard can
+// render both columns without per-row direction inference.
+type edgesResp struct {
+	SpawnID string        `json:"spawn_id"`
+	In      []EdgeRowWire `json:"in"`
+	Out     []EdgeRowWire `json:"out"`
+}
+
 // VerdictRowWire is one agent_verdicts row in the JSON wire shape.
 // ts is unix-nano; lerneffekt_md is omitted when the source row
 // carried NULL or an empty string.
@@ -156,6 +179,7 @@ type verdictsResp struct {
 //   - GET /agents/tree/{spawn_id}
 //   - GET /agents/tokens
 //   - GET /agents/verdicts
+//   - GET /agents/edges       (Phase 2d S5)
 //
 // POST /agents/ingest continues to be served by the chi router (it sits
 // inside the ingest handler's existing bearer-protected sub-group);
@@ -193,6 +217,8 @@ func (h *Handler) AgentsReadMux(authToken string, next http.Handler) http.Handle
 			dispatch = h.readTokens
 		case path == "/agents/verdicts":
 			dispatch = h.readVerdicts
+		case path == "/agents/edges":
+			dispatch = h.readEdges
 		default:
 			// Unknown /agents/<x> path — let the chi router handle it
 			// (currently only POST /agents/ingest is registered there;
@@ -397,6 +423,65 @@ func (h *Handler) readVerdicts(w http.ResponseWriter, r *http.Request) {
 		SpawnID:  spawnID,
 		Verdicts: wires,
 	})
+}
+
+// readEdges handles GET /agents/edges?spawn_id=…
+//
+// Returns the in-edges (rows whose to_spawn_id == spawn_id) and the
+// out-edges (rows whose from_spawn_id == spawn_id) as two parallel
+// slices. Empty slices (not null) are emitted when the spawn has no
+// edges in a direction so consumers can iterate without nil-guards.
+//
+// Phase 2d S5 — mailbox-edge read surface. Cross-references to live-tail
+// events (events.id ↔ spawn) are an open architecture question (see
+// ADR-014 — Proposed, status awaits Admin/Chakotay decision); this
+// endpoint deliberately ships in the simpler shape (in/out only) so the
+// data is consumable today, and a future field-addition (e.g.
+// `event_refs`) stays non-breaking on top.
+func (h *Handler) readEdges(w http.ResponseWriter, r *http.Request) {
+	spawnID := strings.TrimSpace(r.URL.Query().Get("spawn_id"))
+	if spawnID == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("spawn_id required"))
+		return
+	}
+	if !isValidSpawnIDFormat(spawnID) {
+		writeJSON(w, http.StatusBadRequest, errorBody("invalid spawn_id"))
+		return
+	}
+
+	ctx := r.Context()
+	inRows, outRows, err := h.store.AgentEdgesForSpawn(ctx, spawnID)
+	if err != nil {
+		h.logReadError(ctx, "agents readEdges", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("edges query failed"))
+		return
+	}
+
+	in := make([]EdgeRowWire, 0, len(inRows))
+	for _, e := range inRows {
+		in = append(in, edgeRowToWire(e))
+	}
+	out := make([]EdgeRowWire, 0, len(outRows))
+	for _, e := range outRows {
+		out = append(out, edgeRowToWire(e))
+	}
+	writeJSON(w, http.StatusOK, edgesResp{
+		SpawnID: spawnID,
+		In:      in,
+		Out:     out,
+	})
+}
+
+// edgeRowToWire converts the store-layer AgentMailboxEdgeRow to the
+// public EdgeRowWire JSON shape.
+func edgeRowToWire(e store.AgentMailboxEdgeRow) EdgeRowWire {
+	return EdgeRowWire{
+		ID:          e.ID,
+		FromSpawnID: e.FromSpawnID,
+		ToSpawnID:   e.ToSpawnID,
+		EdgeType:    e.EdgeType,
+		TS:          e.TS.UnixNano(),
+	}
 }
 
 // spawnRowToWire converts the store-layer AgentSpawnRow to the public
