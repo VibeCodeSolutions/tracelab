@@ -82,6 +82,7 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		slog.Int64("tokens", result.Tokens),
 		slog.Int64("verdicts", result.Verdicts),
 		slog.Int64("mailbox_edges", result.MailboxEdges),
+		slog.Int64("event_refs", result.EventRefs),
 	)
 	writeJSON(w, http.StatusOK, ingestResponse{Ingested: result})
 }
@@ -156,6 +157,23 @@ func (h *Handler) persist(ctx context.Context, p IngestPayload) (store.AgentInse
 			return res, err
 		}
 		res.MailboxEdges += n
+	}
+
+	// Phase 2d S5-Tail — agent_event_refs (ADR-014 Accepted, Option B).
+	// Cross-domain bridge from this spawn to an events row from the
+	// app-log domain. Additive to the persist loop; existing callers
+	// that omit EventRefs are no-op'd here.
+	for _, er := range p.EventRefs {
+		n, err := h.store.InsertAgentEventRef(ctx, store.AgentEventRef{
+			SpawnID: er.SpawnID,
+			EventID: er.EventID,
+			RefType: er.RefType,
+			TS:      nsToTime(er.TS),
+		})
+		if err != nil {
+			return res, err
+		}
+		res.EventRefs += n
 	}
 	return res, nil
 }

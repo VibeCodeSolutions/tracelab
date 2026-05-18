@@ -73,28 +73,42 @@ type AgentIngestMailboxEdge struct {
 	TS          int64  `json:"ts"`
 }
 
+// AgentIngestEventRef is one agent_event_refs row (Phase 2d S5-Tail,
+// ADR-014 Accepted, Option B). All four fields are required; ref_type
+// must be one of "observed" | "context" | "caused-by".
+type AgentIngestEventRef struct {
+	SpawnID string `json:"spawn_id"`
+	EventID int64  `json:"event_id"`
+	RefType string `json:"ref_type"`
+	TS      int64  `json:"ts"`
+}
+
 // AgentIngestPayload is the request envelope for POST /agents/ingest.
 // Source is required ("sdk-hook", "transcript", "mcp-push"); the
 // nested records are each optional but at least one of
-// spawn/tokens/verdicts/mailbox_edges must be present (the server
-// 400s on a fully empty payload).
+// spawn/tokens/verdicts/mailbox_edges/event_refs must be present (the
+// server 400s on a fully empty payload).
 type AgentIngestPayload struct {
 	Source       string                   `json:"source"`
 	Spawn        *AgentIngestSpawn        `json:"spawn,omitempty"`
 	Tokens       []AgentIngestTokens      `json:"tokens,omitempty"`
 	Verdicts     []AgentIngestVerdict     `json:"verdicts,omitempty"`
 	MailboxEdges []AgentIngestMailboxEdge `json:"mailbox_edges,omitempty"`
+	EventRefs    []AgentIngestEventRef    `json:"event_refs,omitempty"`
 }
 
 // AgentIngestCounts mirrors the server's
 // internal/store.AgentInsertResult — per-table counts of rows that
 // actually landed (vs. rows the INSERT OR IGNORE idempotency guard
-// collapsed). A response of {0,0,0,0} is a fully-idempotent repeat.
+// collapsed). A response of {0,0,0,0,0} is a fully-idempotent repeat.
+//
+// EventRefs added Phase 2d S5-Tail (ADR-014 Accepted, Option B).
 type AgentIngestCounts struct {
 	Spawns       int64 `json:"spawns"`
 	Tokens       int64 `json:"tokens"`
 	Verdicts     int64 `json:"verdicts"`
 	MailboxEdges int64 `json:"mailbox_edges"`
+	EventRefs    int64 `json:"event_refs"`
 }
 
 // AgentIngestResponse is the response envelope for POST /agents/ingest.
@@ -221,6 +235,28 @@ type AgentEdges struct {
 	Out     []AgentEdgeRow `json:"out"`
 }
 
+// AgentEventRefRow is one agent_event_refs row in the read wire shape.
+// ts is unix-nano. Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+type AgentEventRefRow struct {
+	ID      int64  `json:"id"`
+	SpawnID string `json:"spawn_id"`
+	EventID int64  `json:"event_id"`
+	RefType string `json:"ref_type"`
+	TS      int64  `json:"ts"`
+}
+
+// AgentEventRefs is the response body for GET /agents/event_refs?spawn_id=…
+// Single slice — every row is anchored at the spawn_id; ordered ts ASC.
+// EventRefs is always non-nil (empty when the spawn has no references).
+//
+// Phase 2d S5-Tail — ADR-014 Accepted (Option B, separate
+// agent_event_refs table). Sibling to AgentsEdges; the two read
+// surfaces stay independent.
+type AgentEventRefs struct {
+	SpawnID   string             `json:"spawn_id"`
+	EventRefs []AgentEventRefRow `json:"event_refs"`
+}
+
 // AgentsSessions calls the hub's GET /agents/sessions endpoint.
 // limit <= 0 means "use the hub default" (currently 50). offset < 0
 // is treated as 0. project / sessionRef are optional exact-match
@@ -316,6 +352,32 @@ func (c *Client) AgentsEdges(ctx context.Context, spawnID string) (AgentEdges, e
 	}
 	if resp.Out == nil {
 		resp.Out = []AgentEdgeRow{}
+	}
+	return resp, nil
+}
+
+// AgentsEventRefs calls the hub's GET /agents/event_refs?spawn_id=… endpoint.
+// Returns every agent_event_refs row attached to the spawn (ordered ts ASC).
+// EventRefs is always non-nil (empty when the spawn has no references).
+//
+// Phase 2d S5-Tail — ADR-014 Accepted (Option B, separate
+// agent_event_refs table).
+func (c *Client) AgentsEventRefs(ctx context.Context, spawnID string) (AgentEventRefs, error) {
+	if spawnID == "" {
+		return AgentEventRefs{}, errors.New("client: AgentsEventRefs requires a non-empty spawn_id")
+	}
+	var resp AgentEventRefs
+	q := url.Values{"spawn_id": []string{spawnID}}
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     "/agents/event_refs?" + q.Encode(),
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentEventRefs{}, err
+	}
+	if resp.EventRefs == nil {
+		resp.EventRefs = []AgentEventRefRow{}
 	}
 	return resp, nil
 }

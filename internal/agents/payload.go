@@ -58,6 +58,14 @@ var validEdgeTypes = map[string]bool{
 	"delegate": true,
 }
 
+// validEventRefTypes mirrors the schema CHECK on agent_event_refs.ref_type.
+// Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+var validEventRefTypes = map[string]bool{
+	"observed":  true,
+	"context":   true,
+	"caused-by": true,
+}
+
 // IngestPayload is the wire-level JSON the /agents/ingest endpoint
 // accepts. All sub-records are optional per source — a transcript-tail
 // often carries only `tokens` + `verdict` for an existing spawn; an
@@ -67,11 +75,16 @@ var validEdgeTypes = map[string]bool{
 // The `source` discriminator is required and shapes the schema
 // dispatch (see ADR-013 §Consequences §Wire-compat statement).
 type IngestPayload struct {
-	Source       Source              `json:"source"`
-	Spawn        *SpawnPayload       `json:"spawn,omitempty"`
-	Tokens       []TokensPayload     `json:"tokens,omitempty"`
-	Verdicts     []VerdictPayload    `json:"verdicts,omitempty"`
+	Source       Source               `json:"source"`
+	Spawn        *SpawnPayload        `json:"spawn,omitempty"`
+	Tokens       []TokensPayload      `json:"tokens,omitempty"`
+	Verdicts     []VerdictPayload     `json:"verdicts,omitempty"`
 	MailboxEdges []MailboxEdgePayload `json:"mailbox_edges,omitempty"`
+	// EventRefs added Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+	// Cross-domain bridge from a spawn to an events row from the
+	// app-log domain. Additive to the wire envelope — older writers
+	// simply omit the field.
+	EventRefs []EventRefPayload `json:"event_refs,omitempty"`
 }
 
 // SpawnPayload is a single agent_spawns row. ID is writer-supplied
@@ -118,6 +131,21 @@ type MailboxEdgePayload struct {
 	TS          int64  `json:"ts"`
 }
 
+// EventRefPayload is a single agent_event_refs row (Phase 2d S5-Tail,
+// ADR-014 Accepted, Option B). All four fields are required.
+//
+//   - SpawnID  → FK to agent_spawns.id (ULID-shaped writer-supplied)
+//   - EventID  → FK to events.id (AUTOINCREMENT integer from migration 0001)
+//   - RefType  → one of "observed" | "context" | "caused-by"
+//   - TS       → unix-nano timestamp of the reference (matches the
+//                contract on tokens/verdicts/edges)
+type EventRefPayload struct {
+	SpawnID string `json:"spawn_id"`
+	EventID int64  `json:"event_id"`
+	RefType string `json:"ref_type"`
+	TS      int64  `json:"ts"`
+}
+
 // validate runs the source-and-enum-vocabulary checks that the handler
 // promises to do BEFORE touching the database. A nil error means the
 // payload is shape-safe (handler can proceed with persistence); a
@@ -134,8 +162,8 @@ func (p *IngestPayload) validate() error {
 	if !validSources[p.Source] {
 		return fmt.Errorf("unknown source %q (want one of sdk-hook|transcript|mcp-push)", p.Source)
 	}
-	if p.Spawn == nil && len(p.Tokens) == 0 && len(p.Verdicts) == 0 && len(p.MailboxEdges) == 0 {
-		return fmt.Errorf("payload is empty (need at least one of spawn|tokens|verdicts|mailbox_edges)")
+	if p.Spawn == nil && len(p.Tokens) == 0 && len(p.Verdicts) == 0 && len(p.MailboxEdges) == 0 && len(p.EventRefs) == 0 {
+		return fmt.Errorf("payload is empty (need at least one of spawn|tokens|verdicts|mailbox_edges|event_refs)")
 	}
 	if p.Spawn != nil {
 		if p.Spawn.ID == "" {
@@ -179,6 +207,20 @@ func (p *IngestPayload) validate() error {
 		}
 		if e.TS <= 0 {
 			return fmt.Errorf("mailbox_edges[%d].ts required (unix-nano > 0)", i)
+		}
+	}
+	for i, er := range p.EventRefs {
+		if er.SpawnID == "" {
+			return fmt.Errorf("event_refs[%d].spawn_id required", i)
+		}
+		if er.EventID <= 0 {
+			return fmt.Errorf("event_refs[%d].event_id required (positive integer FK to events.id)", i)
+		}
+		if !validEventRefTypes[er.RefType] {
+			return fmt.Errorf("event_refs[%d].ref_type %q invalid (want observed|context|caused-by)", i, er.RefType)
+		}
+		if er.TS <= 0 {
+			return fmt.Errorf("event_refs[%d].ts required (unix-nano > 0)", i)
 		}
 	}
 	return nil
