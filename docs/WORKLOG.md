@@ -1,16 +1,16 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s4-eroeffnet — S4 (Agents-Tab funktional) routet an belanna nach Admin „ja". Multi-Ingest-Pipeline (S1-S3) komplett, 3-Klauseln-Methodik-Promotion in Worker-Brief-Konventionen.md erledigt. S4 macht den Phase-2c-S5-Stub („coming soon") funktional: Read-API (`/agents/sessions`, `/agents/tree/{id}`, `/agents/tokens`, `/agents/verdicts` falls noch nicht da) + `tab_agents.gohtml`-Funktionalisierung mit Spawn-Tree-Viz + Token-Usage-Burn-Down + Verdict-Display. Mailbox-Edges erst S5. Cross-Check-Scope 19. Anwendung. Pre-Hardcoding-Verifikation 4. Anwendung (Hub-Read-Surface + Phase-2c-UI-Konventionen). Branch `feat/phase-2d-agents` @ `1f03d00`.
-last-updated: 2026-05-17
-qs-letzter-lauf: qs-20260517-005
+status: phase-2d-s5-eroeffnet — S5 (Mailbox-Edges + Cross-Refs Live-Tail + Sammel-Gate Phase 2d gesamt) routet an belanna nach Admin „ok". S0-S4 alle QS-grün (qs-20260517-002/003/004/005 + qs-20260518-001). **Letzter Sub-Sprint der Phase 2d** — Sammel-Gate-Charakter, Plan-explizit Auto-Stop, FF-Merge-Approval nach Sammel-Gate-grün. Mailbox-Edges = vierte Tabelle aus S0-Schema (`agent_mailbox_edges`), bisher nur dokumentiert nicht implementiert. Cross-Refs zu Live-Tail-Events verbinden Agent-Tree mit WS-Tail-Stream. Tuvok-Klasse: release-qs über alle 5 Sub-Sprints (S0+S1+S2+S3+S4+S5) für Cross-Sub-Sprint-Konsistenz + Wire-Stability + Cross-Compile-Final + Push-Ready vor FF-Merge nach `main`. Pre-Hardcoding-Verifikation 5. Anwendung. Cross-Check-Scope 20. Anwendung. Branch `feat/phase-2d-agents` @ `1b02052`.
+last-updated: 2026-05-18
+qs-letzter-lauf: qs-20260518-001
 phase-1-merge-commit: cee7a5d
 phase-1-tail-merge-commit: 60adf48
 phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#035 — Phase-2d-S4 Agents-Tab funktional, an belanna geroutet"
+aktiver-auftrag: "#036 — Phase-2d-S5 Mailbox-Edges + Sammel-Gate Phase 2d gesamt, an belanna geroutet"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,68 @@ aktiver-auftrag: "#035 — Phase-2d-S4 Agents-Tab funktional, an belanna geroute
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #036 — Tracelab Phase-2d-S5 — Mailbox-Edges + Cross-Refs Live-Tail + Sammel-Gate Phase 2d gesamt
+
+- **Timestamp:** 2026-05-18T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin („ok" auf S5-Routing-Frage nach #035-Findings-Gate-Bericht) → Chakotay (S5 routet an belanna, letzter Sub-Sprint der Phase 2d) → belanna
+- **Auftrag:** S5 = **Mailbox-Edges + Cross-Refs Live-Tail + Sammel-Gate Phase 2d gesamt** (letzter Sub-Sprint der Phase 2d). Drei Deliverables:
+  1. **Mailbox-Edges-Implementation:** `agent_mailbox_edges`-Tabelle aus S0-Schema implementieren (bisher nur dokumentiert). Edges sind Cross-Refs zwischen Agent-Spawns (z.B. Crew-Traffic: belanna → ballard → belanna; tuvok → chakotay; chakotay → admin). Ingest-Path: alle 3 Sources (sdk-hook/transcript/mcp-push) können Edges schreiben — Transcript-Tail extrahiert sie aus tool-use-Events mit Subagent-Returns, MCP-Push und SDK-Hooks pushen sie explizit.
+  2. **Cross-Refs zu Live-Tail-Events:** Agent-Tree-Spawns müssen mit Hub-WS-Tail-Events verlinkbar sein — z.B. wenn ein Crash-Event in `/tail` auftritt während ein Spawn aktiv ist, soll der Spawn zu diesem Event verlinkt sein. Schema-Frage offen (Pre-Hardcoding-Verifikation klärt): braucht es eine neue `agent_event_refs`-Tabelle oder reichen `mailbox_edges` mit erweiterten `target_type`-Werten?
+  3. **Agents-Tab UI-Erweiterung:** Mailbox-Edges + Cross-Refs im Agents-Tab visuell zeigen (z.B. Spawn-Karte zeigt eingehende/ausgehende Edges + verlinkte Tail-Events als Sub-Liste).
+- **Branch:** `feat/phase-2d-agents` (HEAD `1b02052`, S0+S1+S2+S3+S4 + alle Findings-Gate-Syncs drauf, push synchron mit origin)
+- **DoD S5:**
+  - **Mailbox-Edges-Persistenz:**
+    - Store-Layer: `internal/store/agents.go` ergänzt um `InsertMailboxEdge(from_spawn_id, to_spawn_id, edge_type, source, payload_json, occurred_at)` + Read-Query `GetMailboxEdgesForSpawn(spawn_id) (in []Edge, out []Edge)`
+    - Schema-Migration: `migrations/0004_agent_mailbox_edges.up.sql` (Tabelle `agent_mailbox_edges` mit Foreign-Keys auf `agent_spawns(id)`, Index auf (from_spawn_id, occurred_at) und (to_spawn_id, occurred_at)) + .down.sql für Rollback
+    - Idempotenz via `(from_spawn_id, to_spawn_id, edge_type, occurred_at)` UNIQUE-Tupel (analog zu agent_tokens-Pattern)
+  - **Multi-Source-Ingest für Edges (alle 3 Quellen können Edges schreiben):**
+    - SDK-Hooks-Source: PostToolUse-Event mit `Task`-Tool-Use → Edge `parent → child` mit `edge_type="spawn"`
+    - Transcript-Tail-Source: Sub-Agent-Returns + Tool-Use-Events in JSONL → Edges extrahieren
+    - MCP-Push-Source: `agent_event`-Tool bekommt optional `mailbox_edges[]`-Array — bereits im Schema aus S3 vorgesehen, jetzt persistent
+  - **Cross-Refs zu Live-Tail-Events (Architektur-Frage, Pre-Hardcoding-Verifikation klärt):**
+    - Option A: `agent_mailbox_edges` mit `to_event_id` (FK auf `events.id`) + `target_type IN ('spawn', 'event')` — single-table polymorph
+    - Option B: separate `agent_event_refs`-Tabelle (FK auf `events.id` + `spawn_id`) — relational klar getrennt
+    - **Auto-Stop bei Architektur-Entscheidung** — Worker dokumentiert beide Optionen in ARCH.md, fragt zurück
+  - **Read-Endpoint** (additiv zu S4-Read-Surface): `GET /agents/edges?spawn_id=…` mit eingehenden + ausgehenden Edges + verlinkten Tail-Events
+  - **UI-Erweiterung Agents-Tab:** Spawn-Karte zeigt Edges-Sub-Liste (in/out, Tail-Event-Links wenn `target_type=event`). Konsistent mit Phase-2c-UI-Pattern (`tl-table-wrap`, `tl-empty-state`).
+  - **Tests:**
+    - Store-Layer-Tests: InsertMailboxEdge + GetMailboxEdgesForSpawn (Idempotenz, FK-Violations, leere Spawns)
+    - 3-Source-Cross-Verifikation für Edges (analog zu S3 `TestAgentsIngestThreeSourceCoexistence`): SDK-Hook + Transcript-Tail + MCP-Push schreiben Edges für dieselben Spawns → keine Schema-Violations, korrekte Per-Source-Forensik
+    - Read-Endpoint-Tests: leeres Spawn, einseitige Edges (nur in / nur out), Bearer-Auth
+    - Dashboard-Template-Test: Edges-Sub-Liste rendert, Tail-Event-Link funktional
+  - **ARCH.md-Erweiterung:** „Phase 2d — Agent-Ingest Layer"-Sektion bekommt **Mailbox-Edges-Sub-Sektion** mit Schema-Tabelle + ADR-014 (Cross-Ref-Strategie Option A vs B mit Entscheidung)
+- **Sammel-Gate-Komponente (PFLICHT als Teil der QS, nicht zusätzlicher Lauf):**
+  - Tuvok release-qs über **Phase 2d gesamt** (S0+S1+S2+S3+S4+S5 zusammen, nicht nur S5-Sub-Sprint-QS) — analog Phase-2c-S5-Sammel-Gate-Pattern
+  - Cross-Sub-Sprint-Konsistenz: ARCH.md-Sektion „Phase 2d" durchgehend kohärent, alle 4 ADRs (ADR-013 Multi-Ingest + ADR-014 Cross-Ref + ggf. weitere) Accepted-Status, Schema-Migrations 0003+0004 sauber chain-fähig
+  - Wire-Stability: alle bestehenden Endpoints + MCP-Tools + CLI-Verhalten unverändert (S0-S4-Snapshot als Baseline)
+  - Cross-Compile-Final: `make hub mcp mcp-windows hub-windows` → 4 saubere CGO-freie Binaries (ELF + PE32+)
+  - Push-Ready-Verifikation: Branch sauber für FF-Merge nach `main`
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — Schema-Migration + Store-Layer + Multi-Source-Ingest + Read-Endpoint + UI-Erweiterung + Tests + ARCH-Erweiterung mit ADR-014)
+  - QS-Spawn tuvok (Klasse 🔴 release-qs — **Sammel-Gate-Charakter über Phase 2d gesamt**, nicht nur S5-isoliert)
+  - **Cross-Check-Scope (20. Anwendung):** Erlaubt: `migrations/` (0004 neu), `internal/store/agents.go` (Edge-Queries additiv), `internal/agents/` (Multi-Source-Ingest-Erweiterung + Read-Handler für `/agents/edges` additiv — Owner-Files für S1-S4 nur additiv falls überhaupt nötig), `cmd/hub/main.go` (ggf. Route-Wireup), `cmd/mcp/` (agent_event-Tool-Erweiterung für mailbox_edges-Array, additiv zu S3), `internal/dashboard/agents.go` + `web/templates/tab_agents.gohtml` (Edges-Anzeige additiv), `internal/client/agents.go` (Edge-Methode additiv), `docs/ARCH.md` (Sub-Sektion + ADR-014), `docs/WORKLOG.md`. **0 Bytes Diff in:** `cmd/cli/`, Phase-1/2a-Pakete (`internal/adb/`, `internal/crash/`, `internal/ingest/`, `internal/ws/`, `internal/config/`, `internal/cliconfig/`, `internal/http/`).
+- **PRE-HARDCODING-VERIFIKATION (PFLICHT — 5. Anwendung):**
+  - **Schema-Definition aus S0 prüfen:** `agent_mailbox_edges` ist in `docs/ARCH.md` „Phase 2d — Agent-Ingest Layer"-Sektion definiert. **EMPIRISCH lesen** welche Felder S0 für diese Tabelle vorgesehen hat (from_spawn_id, to_spawn_id, edge_type, source, payload_json, occurred_at? oder andere?). Migration baut darauf, **nicht auf Briefing-Annahme**.
+  - **Live-Tail-Events-Schema:** Lies `internal/store/store.go` (oder wo immer `events`-Tabelle definiert ist) und verifiziere: gibt es `events.id` als referenzierbare Primary-Key, oder ist `events` zeitserien-orientiert ohne stabile IDs? Bestimmt die Cross-Ref-Architektur (Option A vs Option B).
+  - **MCP-Push agent_event-Tool aus S3:** Lies `cmd/mcp/agent_event.go` und prüfe ob `mailbox_edges[]`-Array bereits im Tool-Schema vorgesehen ist (laut S3-Plan war es optional). Wenn ja: nur persistenter machen, nicht Tool-Schema ändern.
+  - **Transcript-Tail-Parser aus S2:** Lies `internal/agents/transcript.go` und prüfe wo Edges aus tool-use-Events extrahierbar sind (subagent-spawn-Events haben typischerweise `tool_use_id` und nested-tool-results).
+  - **3-Source-Cross-Test-Pattern aus S3:** Lies `internal/agents/three_source_test.go` als Vorlage für den 4-Source-Edge-Cross-Test (analog Pattern, Edges-Forensik statt Tokens-Forensik).
+  - **Phase-2c-Vorbild:** Phase-2c-S5-Sammel-Gate-Lauf (`case-chakotay-018-p2c-s5-sammel-gate-phase-closure-ready.md`) als Mental-Modell für Sammel-Gate-QS-Pattern.
+- **Auto-Stop-Trigger:**
+  - **Cross-Ref-Architektur-Entscheidung** (Option A polymorph vs Option B separate Tabelle) — **Pflicht-Auto-Stop**, ARCH.md-Optionen-Dokumentation + Empfehlung, Admin/Chakotay entscheidet
+  - Schema-Migration-Konflikt: 0004 kollidiert mit bestehender Schema-Migration-Chain → Stop + Re-Review
+  - Live-Tail-Events haben keine stabile referenzierbare PK → Stop + Schema-Re-Design
+  - 3-Source-Edge-Cross-Test findet Race-Condition zwischen Sources → Stop + Schema-Re-Review
+  - UI-Pattern bricht (z.B. Edges-Sub-Liste sprengt Mobile-Layout) → Stop + Visual-Pattern-Klärung
+- **Phasen-Status:** S5 ist 5. von 5 Sub-Sprints (S0+S1+S2+S3+S4 alle ✅ QS-grün). **Letzter Sub-Sprint der Phase 2d.** Nach S5-Sammel-Gate-grün → FF-Merge-Approval-Frage an Admin (analog Phase 2b/2c-Closure-Pattern). Plan-explizit **kein Auto-Chain** (Sammel-Gate-Charakter).
+- **Status:** offen — wartet auf Belanna-Annahme
+- **Verlauf:**
+  - 2026-05-18T (Eröffnung) — chakotay: Admin „ok" auf S5-Routing-Frage. Routet S5 an belanna mit Pre-Hardcoding-Verifikation-Pflicht (5. Anwendung — Schema-Definition aus S0 + Live-Tail-Events-Schema + agent_event-Tool aus S3 + Transcript-Tail-Parser aus S2 + 3-Source-Cross-Test-Pattern aus S3). 3-Klauseln-Methodik gilt regulär. Sammel-Gate-Charakter: Tuvok-QS umfasst die GESAMTE Phase 2d, nicht nur S5. Architektur-Auto-Stop für Cross-Ref-Option A vs B explizit eingeplant.
 
 ---
 
