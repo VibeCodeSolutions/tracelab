@@ -35,8 +35,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("want version 3, got %d", version)
+	if version != 5 {
+		t.Fatalf("want version 5, got %d", version)
 	}
 
 	// Phase-1 + Phase-2d core tables must all exist.
@@ -171,8 +171,8 @@ func TestIdempotentMigrations(t *testing.T) {
 		`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 3 {
-		t.Fatalf("schema_migrations count = %d, want 3 (idempotent)", count)
+	if count != 4 {
+		t.Fatalf("schema_migrations count = %d, want 4 (idempotent)", count)
 	}
 }
 
