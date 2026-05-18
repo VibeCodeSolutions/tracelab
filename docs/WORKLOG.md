@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-s5-eroeffnet — S5 (Mailbox-Edges + Cross-Refs Live-Tail + Sammel-Gate Phase 2d gesamt) routet an belanna nach Admin „ok". S0-S4 alle QS-grün (qs-20260517-002/003/004/005 + qs-20260518-001). **Letzter Sub-Sprint der Phase 2d** — Sammel-Gate-Charakter, Plan-explizit Auto-Stop, FF-Merge-Approval nach Sammel-Gate-grün. Mailbox-Edges = vierte Tabelle aus S0-Schema (`agent_mailbox_edges`), bisher nur dokumentiert nicht implementiert. Cross-Refs zu Live-Tail-Events verbinden Agent-Tree mit WS-Tail-Stream. Tuvok-Klasse: release-qs über alle 5 Sub-Sprints (S0+S1+S2+S3+S4+S5) für Cross-Sub-Sprint-Konsistenz + Wire-Stability + Cross-Compile-Final + Push-Ready vor FF-Merge nach `main`. Pre-Hardcoding-Verifikation 5. Anwendung. Cross-Check-Scope 20. Anwendung. Branch `feat/phase-2d-agents` @ `1b02052`.
+status: phase-2d-s5-tail-eroeffnet — S5 D1+D3 worker-done (`3d691d0` push synchron). **ADR-014 Accepted: Option B** (separate `agent_event_refs`-Tabelle) per Admin-Confirm 2026-05-18. #036 bleibt offen (worker-done für D1+D3, Sammel-Gate-QS pending). **#037 = Phase-2d-S5-Tail D2-Implementation** (additive Migration 0005 + agent_event_refs-CRUD + `/agents/event_refs`-Endpoint + Client-Methode + UI-Sub-Liste) routet an belanna. Sammel-Gate-Strategie: EIN Tuvok release-qs über Phase 2d gesamt (S0-S5 inkl. #036+#037) nach #037-Worker-Done (spart QS-Token, saubere Phase-Closure). Cross-Check-Scope 21. Anwendung. Pre-Hardcoding-Verifikation 6. Anwendung. Branch `feat/phase-2d-agents` @ `7287b82`.
 last-updated: 2026-05-18
 qs-letzter-lauf: qs-20260518-001
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,7 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#036 — Phase-2d-S5 Mailbox-Edges + Sammel-Gate Phase 2d gesamt, an belanna geroutet"
+aktiver-auftrag: "#037 — Phase-2d-S5-Tail D2 (agent_event_refs) an belanna geroutet"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
@@ -25,6 +25,63 @@ aktiver-auftrag: "#036 — Phase-2d-S5 Mailbox-Edges + Sammel-Gate Phase 2d gesa
 > **2026-05-13 PHASE 2 ERÖFFNET (AUFTRAG #010, Phase 2a):** Tool-Kette baut auf MVP-Hub auf — Phase 2 = CLI → MCP → Dashboard (linear). Plan-File: `~/.claude/plans/tracelab-phase-2-roadmap.md` (Admin-bestätigt Block 1/2/3). Phase 2a startet jetzt: `tracelab` CLI mit Subkommandos `run`/`tail`/`sessions`/`adb`. Branch `feat/phase-2-cli` von `main`@e4eb434.
 >
 > **2026-05-14 ADR-005 ENTSCHIEDEN — Phase-2a-DoD-Anpassung (Admin grün):** Option C — `run` wird aus Phase 2a gestrichen. `tracelab-hub` bleibt Daemon-Start, CLI ist purer Consumer (`sessions`/`tail`/`adb`). Begründung Belanna (übernommen): Daemon-Management ist eigene Problemklasse, separat von Log-Konsumption; CLI+MCP zuerst in Userhand bekommen, `run` später revisit falls realer Bedarf. DoD von AUFTRAG #010 entsprechend reduziert auf S1-S5 (`run.go`-Stub bleibt cosmetic im Code mit Stage-Mapping „revisit later if needed", kann nach Phase-2a-Merge separat aufgeräumt werden). **Phase 2a ist mit S5-Findings-Gate effektiv abgeschlossen** — wartet auf Admin-Confirm für FF-Merge `feat/phase-2-cli` → `main`. Bookmarks für post-Merge / Backlog: (a) `tracelab.toml.example`-Doku-Update für `cfg.ADB.Enabled` mit DeviceSerial-Pflicht, (b) 200-OK-Discriminator-Body-Pattern als API-Convention-Section in `docs/ARCH.md`, (c) `run.go`-Stub-Refactor nach Phase-2a-Merge (entweder ganz raus oder klarer „not part of CLI scope"-Hinweis).
+
+---
+
+## AUFTRAG #037 — Tracelab Phase-2d-S5-Tail — D2 agent_event_refs (Cross-Refs Agent-Tree ↔ Live-Tail-Events)
+
+- **Timestamp:** 2026-05-18T (Eröffnung)
+- **Von:** chakotay
+- **An:** belanna
+- **Quelle-Kette:** Admin (AskUserQuestion-Antworten 2026-05-18: ADR-014 → Option B + Sammel-Gate-Strategie → erst D2, dann ein Sammel-Gate) → Chakotay (ADR-014 auf Accepted gepatcht in `docs/ARCH.md`, #037 routet an belanna für D2-Implementation) → belanna
+- **Auftrag:** Phase-2d-S5-Tail = **D2-Implementation: agent_event_refs als separate Tabelle** (ADR-014 Option B Accepted). Folge-Sprint zu #036 (das D1+D3 abgedeckt hat, worker-done aber Sammel-Gate-QS pending). Nach #037-Worker-Done → EIN Tuvok release-qs Sammel-Gate über **Phase 2d gesamt** (S0+S1+S2+S3+S4+S5 inkl. #036+#037).
+- **Branch:** `feat/phase-2d-agents` (HEAD `7287b82` — `3d691d0` Worker-Stand + `7287b82` Eskalations-Routing-Sync, jetzt ADR-014 Accepted Edit + #036-#037-WORKLOG-Update als nächster Commit)
+- **DoD #037:**
+  - **Schema-Migration `migrations/0005_agent_event_refs.{up,down}.sql`:**
+    - `CREATE TABLE agent_event_refs` mit Schema aus ARCH.md ADR-014 (id PK AUTOINCREMENT, spawn_id TEXT FK agent_spawns(id) ON DELETE CASCADE NOT NULL, event_id INTEGER FK events(id) ON DELETE CASCADE NOT NULL, ref_type TEXT NOT NULL CHECK('observed','context','caused-by'), ts INTEGER NOT NULL)
+    - `CREATE UNIQUE INDEX idx_agent_event_refs_uniq` auf (spawn_id, event_id, ref_type, ts)
+    - `CREATE INDEX idx_agent_event_refs_spawn` und `idx_agent_event_refs_event`
+    - .down.sql: einfaches `DROP TABLE` (additive Migration, kein Data-Loss-Pfad)
+  - **Store-Layer in `internal/store/agents.go`:**
+    - `InsertAgentEventRef(ctx, spawn_id, event_id, ref_type, ts)` mit Idempotenz via UNIQUE-Tupel
+    - `AgentEventRefsForSpawn(ctx, spawn_id) []AgentEventRef`
+    - Optional batched `AgentEventRefsForSpawnIDs(ids) map[id][]AgentEventRef` falls UI das braucht
+  - **Multi-Source-Ingest für event_refs:**
+    - Transcript-Tail: erweitere `internal/agents/transcript.go` um Event-Ref-Extraktion (z.B. wenn Spawn-Output ein Crash-Event-Marker enthält oder tool_use_result eine Event-ID referenziert — Pre-Hardcoding klärt Marker-Form)
+    - SDK-Hooks-Source: nicht primärer Pfad (event_refs entstehen meist serverseitig), aber wenn Hook-Payload Event-Refs mitliefert, übernehmen
+    - MCP-Push agent_event-Tool: erweitere Tool-Schema um optionalen `event_refs[]`-Array analog `mailbox_edges[]`-Pattern aus S3
+  - **Read-Endpoint** als 6. Route im `AgentsReadMux`: `GET /agents/event_refs?spawn_id=…` mit Bearer-Auth + spawn_id-Format-Guard, JSON-Envelope `{event_refs: [...]}` analog `/agents/edges`
+  - **Client-Methode** in `internal/client/agents.go`: `AgentsEventRefs(ctx, spawnID)` analog `AgentsEdges`
+  - **UI-Erweiterung in `web/templates/tab_agents.gohtml`:**
+    - Neue Sub-Liste **adjacent** zur bestehenden Mailbox-Edges-Sub-Liste (nicht merged — ADR-014 Decision: 2 Domains klar getrennt)
+    - Klasse z.B. `tl-agent-event-ref-list` mit Event-ID + ref_type (Pill-Style analog Verdict-Pill)
+    - Mobile-Floor 14px/44px, `tl-empty-state`-Fallback wenn keine Refs
+  - **Tests:**
+    - Store-Layer-Tests in `agents_event_refs_test.go` (Insert + Read + Idempotenz + FK-Violations bei nicht-existentem Event/Spawn)
+    - 3-Source-Cross-Verifikation analog `three_source_edges_test.go` (alle 3 Sources schreiben event_refs für gleichen Spawn → UNIQUE-Tupel collapse korrekt)
+    - Read-Endpoint-Tests (Bearer-Auth, Bad-spawn_id-Format, leeres Spawn, Multi-Ref-Spawn)
+    - Dashboard-Template-Test: event-ref-Sub-Liste rendert mit Event-ID + ref_type
+    - Optional: Transcript-Tail-Test wenn Marker-Form geklärt ist
+  - **ARCH.md-Update:** ADR-014 Decision-Body ist schon Accepted (durch chakotay), Consequences-Sektion ggf. erweitern wenn Implementation Details offenbart (z.B. Marker-Form für Transcript-Tail-Event-Ref-Extraktion)
+- **Mandat:**
+  - Worker-Spawn ballard (Klasse 🔴 sprint — Migration + Store + Ingest-Erweiterung + Endpoint + Client + UI + Tests)
+  - QS-Spawn tuvok kommt **nach #037-Worker-Done** als **Sammel-Gate über Phase 2d gesamt** (S0+S1+S2+S3+S4+S5 = #031-#036-#037 zusammen) — Cross-Sub-Sprint-Konsistenz + Wire-Stability + Cross-Compile-Final + Push-Ready vor FF-Merge
+  - **Cross-Check-Scope (21. Anwendung):** Erlaubt: `migrations/` (0005 neu), `internal/store/agents.go` (event_refs-Queries additiv), `internal/agents/` (transcript-Erweiterung additiv + Read-Handler für `/agents/event_refs` additiv — Owner-Files für #036-D1+D3 nur additiv), `cmd/hub/main.go` (AgentsReadMux 6. Route), `cmd/mcp/agent_event.go` (event_refs[]-Array-Erweiterung additiv), `internal/dashboard/agents.go` + `web/templates/tab_agents.gohtml` (event-ref-Sub-Liste additiv neben Mailbox-Edges), `web/static/dashboard.css` (nur falls neue Pattern — sonst Wiederverwendung), `internal/client/agents.go` (AgentsEventRefs additiv), `docs/ARCH.md` (ggf. Consequences-Sektion), `docs/WORKLOG.md`. **0 Bytes Diff PFLICHT in:** `cmd/cli/`, Phase-1/2a-Pakete (`internal/adb/`, `internal/crash/`, `internal/ingest/`, `internal/ws/`, `internal/config/`, `internal/cliconfig/`, `internal/http/`).
+- **PRE-HARDCODING-VERIFIKATION (PFLICHT — 6. Anwendung):**
+  - **events-Tabelle-Schema (PK + relevante Felder):** lies `migrations/0001_*.up.sql` und ggf. spätere Event-relevante Migrations + `internal/store/store.go`-Event-Queries. Verifiziere `events.id` ist `INTEGER PRIMARY KEY AUTOINCREMENT` (ADR-014 sagt ja), prüfe ob events weitere FK-relevante Felder hat (session_id? timestamp? severity?).
+  - **Migration-Chain prüfen:** ist `0005_agent_event_refs` die richtige Nummer? Es gibt 0001 (initial), 0002 (?), 0003 (agents schema von S1), 0004 oder direkt 0005? `ls migrations/` checken.
+  - **agent_event-Tool aus S3 → mailbox_edges-Array-Pattern:** lies `cmd/mcp/agent_event.go` für das bestehende `mailbox_edges[]`-Array-Pattern, übernimm es analog für `event_refs[]`-Array (kein neues Pattern erfinden).
+  - **transcript.go aus S2+S5(#036):** lies um Edge-Extraktion zu sehen wie sie jetzt gemacht wird (spawn-edge + return-edge), und analysiere wo event_refs sinnvoll extrahiert werden könnten — z.B. wenn ein Spawn-Output einen `events.id`-Marker hat. **Wenn keine klare Extraktion-Form aus Transcript erkennbar:** Transcript-Tail-Erweiterung als Phase-3-Bookmark markieren und in #037 nur Store-Layer + Endpoint + Manual-Ingest via MCP-Push + UI shippen.
+  - **ref_type-Werte aus ADR-014 (`'observed','context','caused-by'`):** plausibel für aktuellen Scope? Falls nicht: minimaler Set vorschlagen, ADR-014 Consequences-Sektion erweitern.
+- **Auto-Stop-Trigger:**
+  - Transcript-Tail-Event-Ref-Extraktion hat keine klare Marker-Form → Phase-3-Bookmark, weiter mit Store+Endpoint+MCP-Push+UI
+  - Migration 0005 kollidiert mit bestehender Chain → Stop + Re-Review (sollte nicht passieren)
+  - 3-Source-Cross-Test findet Race-Condition oder UNIQUE-Tupel-Konflikt → Stop + Schema-Re-Review
+  - UI-Pattern für event_refs-Sub-Liste sprengt Mobile-Layout → Stop + Visual-Klärung
+- **Phasen-Status:** S5-Tail = letzter Code-Sprint der Phase 2d. Nach #037-Worker-Done → **Sammel-Gate Tuvok release-qs über Phase 2d gesamt** (S0+S1+S2+S3+S4+S5 zusammen, NICHT #037-isoliert) → bei Sammel-Gate-grün FF-Merge-Approval-Frage an Admin.
+- **Status:** offen — wartet auf Belanna-Annahme
+- **Verlauf:**
+  - 2026-05-18T (Eröffnung) — chakotay: Admin „Option B" + „Erst D2 → dann ein Sammel-Gate" via AskUserQuestion. ADR-014 auf Accepted in `docs/ARCH.md` gepatcht (Decision-Body gefüllt mit 3-Reasons-verbatim aus Lead-Empfehlung). #036 bleibt offen (worker-done für D1+D3, Sammel-Gate-QS pending). #037 routet an belanna für D2-Implementation mit Pre-Hardcoding-Verifikation-Pflicht (6. Anwendung — events-Schema + Migration-Chain + agent_event-Tool-Pattern + transcript-Extraktion-Marker + ref_type-Werte). 3-Klauseln-Methodik gilt regulär. Sammel-Gate kommt nach #037 als ein-für-alle.
 
 ---
 

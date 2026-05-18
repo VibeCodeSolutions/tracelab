@@ -2077,7 +2077,7 @@ the data is consumable today and a future field-addition (e.g.
 
 #### ADR-014: Cross-Reference Strategy for Mailbox-Edges and Live-Tail Events
 
-**Status:** Proposed (eröffnet 2026-05-18, wartet auf Admin-Confirm)
+**Status:** Accepted (2026-05-18, Admin-Confirm per AskUserQuestion via chakotay)
 
 ##### Context
 
@@ -2172,7 +2172,15 @@ which is trivial but adds 10-20 lines of glue.
 
 ##### Decision
 
-*(filled in upon Admin-Confirm — see Lead-Empfehlung in §Context above)*
+**Option B** — separate `agent_event_refs` table.
+
+Admin-Confirm 2026-05-18 via chakotay-AskUserQuestion. Rationale per Lead-Empfehlung (ballard) above, all three reasons accepted verbatim:
+
+1. Additive migration 0005 (`CREATE TABLE` only) — no column-relaxation, rollback is single `DROP TABLE`, no data-loss risk.
+2. Domain clarity preserved — `agent_mailbox_edges` stays agent↔agent, `agent_event_refs` becomes agent↔app-log; read consumers never filter on `target_type`.
+3. `/agents/edges` wire-shape stays exactly as shipped in S5; cross-references surface as `/agents/event_refs` sibling endpoint.
+
+Implementation routes via AUFTRAG #037 (Phase-2d-S5-Tail, additive Migration 0005 + CRUD + Endpoint + Client + UI). Sammel-Gate über Phase 2d gesamt (S0-S5) folgt nach #037-Worker-Done — eine Tuvok release-qs über die vollständige Domain.
 
 ##### Consequences
 
