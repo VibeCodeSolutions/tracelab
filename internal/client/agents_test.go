@@ -328,6 +328,72 @@ func TestAgentsVerdicts_HappyPath(t *testing.T) {
 	}
 }
 
+// TestAgentsEdges_HappyPath pins the wire shape of GET /agents/edges:
+// two parallel slices (in / out) with EdgeRow fields populated.
+func TestAgentsEdges_HappyPath(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !contains(r.URL.RawQuery, "spawn_id=parent1") {
+			t.Errorf("query missing spawn_id: %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"spawn_id":"parent1",
+			"in":[
+				{"id":1,"from_spawn_id":"child1","to_spawn_id":"parent1","edge_type":"return","ts":1700000002}
+			],
+			"out":[
+				{"id":2,"from_spawn_id":"parent1","to_spawn_id":"child1","edge_type":"spawn","ts":1700000000},
+				{"id":3,"from_spawn_id":"parent1","to_spawn_id":"sib1","edge_type":"spawn","ts":1700000001}
+			]
+		}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsEdges(context.Background(), "parent1")
+	if err != nil {
+		t.Fatalf("AgentsEdges: %v", err)
+	}
+	if resp.SpawnID != "parent1" {
+		t.Errorf("spawn_id=%q", resp.SpawnID)
+	}
+	if len(resp.In) != 1 || resp.In[0].EdgeType != "return" {
+		t.Errorf("in=%+v", resp.In)
+	}
+	if len(resp.Out) != 2 || resp.Out[0].EdgeType != "spawn" {
+		t.Errorf("out=%+v", resp.Out)
+	}
+}
+
+// TestAgentsEdges_EmptyResponseNonNil pins the nil → empty-slice
+// substitution the client does so consumers can range without nil-guards.
+func TestAgentsEdges_EmptyResponseNonNil(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"spawn_id":"x","in":null,"out":null}`))
+	})
+	c, _ := newTestServer(t, h)
+	resp, err := c.AgentsEdges(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("AgentsEdges: %v", err)
+	}
+	if resp.In == nil {
+		t.Error("In must be non-nil even on empty hub response")
+	}
+	if resp.Out == nil {
+		t.Error("Out must be non-nil even on empty hub response")
+	}
+}
+
+// TestAgentsEdges_EmptyID rejects locally before any HTTP round-trip.
+func TestAgentsEdges_EmptyID(t *testing.T) {
+	h := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("server should not be called on empty id")
+	})
+	c, _ := newTestServer(t, h)
+	if _, err := c.AgentsEdges(context.Background(), ""); err == nil {
+		t.Error("expected error for empty spawn_id")
+	}
+}
+
 func TestAgentsReadEndpoints_Unauthorized(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `unauthorized`, http.StatusUnauthorized)

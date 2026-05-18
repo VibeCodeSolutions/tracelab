@@ -201,6 +201,26 @@ type AgentVerdicts struct {
 	Verdicts []AgentVerdictRow `json:"verdicts"`
 }
 
+// AgentEdgeRow is one agent_mailbox_edges row in the read wire shape.
+// ts is unix-nano. Phase 2d S5.
+type AgentEdgeRow struct {
+	ID          int64  `json:"id"`
+	FromSpawnID string `json:"from_spawn_id"`
+	ToSpawnID   string `json:"to_spawn_id"`
+	EdgeType    string `json:"edge_type"`
+	TS          int64  `json:"ts"`
+}
+
+// AgentEdges is the response body for GET /agents/edges?spawn_id=…
+// Two parallel slices — in-edges (rows pointing AT the spawn) and
+// out-edges (rows pointing AWAY from the spawn). Both are always
+// non-nil; empty when the spawn has no edges in that direction.
+type AgentEdges struct {
+	SpawnID string         `json:"spawn_id"`
+	In      []AgentEdgeRow `json:"in"`
+	Out     []AgentEdgeRow `json:"out"`
+}
+
 // AgentsSessions calls the hub's GET /agents/sessions endpoint.
 // limit <= 0 means "use the hub default" (currently 50). offset < 0
 // is treated as 0. project / sessionRef are optional exact-match
@@ -268,6 +288,34 @@ func (c *Client) AgentsTokens(ctx context.Context, spawnID string) (AgentTokens,
 	}
 	if resp.Totals.BySource == nil {
 		resp.Totals.BySource = map[string]AgentTokenSourceSum{}
+	}
+	return resp, nil
+}
+
+// AgentsEdges calls the hub's GET /agents/edges?spawn_id=… endpoint.
+// Returns the in / out mailbox-edge slices for the spawn; both slices
+// are always non-nil (empty when the spawn has no edges in a direction).
+//
+// Phase 2d S5 — mailbox-edge read surface.
+func (c *Client) AgentsEdges(ctx context.Context, spawnID string) (AgentEdges, error) {
+	if spawnID == "" {
+		return AgentEdges{}, errors.New("client: AgentsEdges requires a non-empty spawn_id")
+	}
+	var resp AgentEdges
+	q := url.Values{"spawn_id": []string{spawnID}}
+	if err := c.doRequest(ctx, requestOpts{
+		method:   http.MethodGet,
+		path:     "/agents/edges?" + q.Encode(),
+		auth:     true,
+		respInto: &resp,
+	}); err != nil {
+		return AgentEdges{}, err
+	}
+	if resp.In == nil {
+		resp.In = []AgentEdgeRow{}
+	}
+	if resp.Out == nil {
+		resp.Out = []AgentEdgeRow{}
 	}
 	return resp, nil
 }
