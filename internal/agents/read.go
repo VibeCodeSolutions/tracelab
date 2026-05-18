@@ -167,6 +167,27 @@ type verdictsResp struct {
 	Verdicts []VerdictRowWire `json:"verdicts"`
 }
 
+// EventRefRowWire is one agent_event_refs row in the JSON wire shape.
+// ts is unix-nano. Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+type EventRefRowWire struct {
+	ID      int64  `json:"id"`
+	SpawnID string `json:"spawn_id"`
+	EventID int64  `json:"event_id"`
+	RefType string `json:"ref_type"`
+	TS      int64  `json:"ts"`
+}
+
+// eventRefsResp is the response body for GET /agents/event_refs?spawn_id=…
+// Phase 2d S5-Tail (ADR-014 Accepted, Option B) — cross-domain bridge
+// from agent_spawns to events (app-log). The shape is a single slice
+// because event_refs are sparse and order-by-ts is the natural reading
+// order; in/out direction (mailbox-edges shape) does not apply here —
+// every row is anchored at this spawn_id.
+type eventRefsResp struct {
+	SpawnID   string            `json:"spawn_id"`
+	EventRefs []EventRefRowWire `json:"event_refs"`
+}
+
 // AgentsReadMux returns an http.Handler that serves the four /agents/*
 // read endpoints with the same bearer-auth posture as the rest of the
 // JSON read surface (/sessions, /events, /crashes). The handler is
@@ -180,6 +201,7 @@ type verdictsResp struct {
 //   - GET /agents/tokens
 //   - GET /agents/verdicts
 //   - GET /agents/edges       (Phase 2d S5)
+//   - GET /agents/event_refs  (Phase 2d S5-Tail, ADR-014 Accepted)
 //
 // POST /agents/ingest continues to be served by the chi router (it sits
 // inside the ingest handler's existing bearer-protected sub-group);
@@ -219,6 +241,8 @@ func (h *Handler) AgentsReadMux(authToken string, next http.Handler) http.Handle
 			dispatch = h.readVerdicts
 		case path == "/agents/edges":
 			dispatch = h.readEdges
+		case path == "/agents/event_refs":
+			dispatch = h.readEventRefs
 		default:
 			// Unknown /agents/<x> path — let the chi router handle it
 			// (currently only POST /agents/ingest is registered there;
@@ -481,6 +505,60 @@ func edgeRowToWire(e store.AgentMailboxEdgeRow) EdgeRowWire {
 		ToSpawnID:   e.ToSpawnID,
 		EdgeType:    e.EdgeType,
 		TS:          e.TS.UnixNano(),
+	}
+}
+
+// readEventRefs handles GET /agents/event_refs?spawn_id=…
+//
+// Returns every agent_event_refs row attached to the spawn, ordered
+// ts ASC. Empty slice (not null) is emitted when the spawn has no
+// event references so consumers can iterate without nil-guards. Mirrors
+// the wire-shape posture of readVerdicts (single-slice, anchored at
+// spawn_id) — event-refs are spawn-anchored, not endpoint-paired the
+// way mailbox-edges are.
+//
+// Phase 2d S5-Tail — ADR-014 Accepted (Option B, separate
+// agent_event_refs table). Sibling endpoint to /agents/edges; the two
+// surfaces stay independent so the mailbox-edge wire shape locked in
+// S5 remains backwards-compatible.
+func (h *Handler) readEventRefs(w http.ResponseWriter, r *http.Request) {
+	spawnID := strings.TrimSpace(r.URL.Query().Get("spawn_id"))
+	if spawnID == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("spawn_id required"))
+		return
+	}
+	if !isValidSpawnIDFormat(spawnID) {
+		writeJSON(w, http.StatusBadRequest, errorBody("invalid spawn_id"))
+		return
+	}
+
+	ctx := r.Context()
+	rows, err := h.store.AgentEventRefsForSpawn(ctx, spawnID)
+	if err != nil {
+		h.logReadError(ctx, "agents readEventRefs", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("event_refs query failed"))
+		return
+	}
+
+	wires := make([]EventRefRowWire, 0, len(rows))
+	for _, e := range rows {
+		wires = append(wires, eventRefRowToWire(e))
+	}
+	writeJSON(w, http.StatusOK, eventRefsResp{
+		SpawnID:   spawnID,
+		EventRefs: wires,
+	})
+}
+
+// eventRefRowToWire converts the store-layer AgentEventRefRow to the
+// public EventRefRowWire JSON shape.
+func eventRefRowToWire(e store.AgentEventRefRow) EventRefRowWire {
+	return EventRefRowWire{
+		ID:      e.ID,
+		SpawnID: e.SpawnID,
+		EventID: e.EventID,
+		RefType: e.RefType,
+		TS:      e.TS.UnixNano(),
 	}
 }
 
