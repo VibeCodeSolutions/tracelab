@@ -2069,11 +2069,12 @@ test `TestAgentsIngestThreeSourceEdgesCollapseOnUniqueTuple` pins
 that the wire path works for sdk-hook today; only the hook script
 itself needs to learn to emit edges, no schema change required.
 
-**Cross-References to live-tail events** — see ADR-014 (Proposed,
-status awaits Admin/Chakotay decision). The S5 `/agents/edges`
-endpoint deliberately ships in the simpler shape (in/out only) so
-the data is consumable today and a future field-addition (e.g.
-`event_refs`) stays backwards-compatible on top.
+**Cross-References to live-tail events** — see ADR-014 (Accepted
+2026-05-18, Option B: separate `agent_event_refs` table). Shipped
+in S5-Tail via migration 0005 + sibling endpoint `/agents/event_refs`.
+The S5 `/agents/edges` endpoint stays in its original simpler shape
+(in/out only) per ADR-014 §Decision rationale (3) — wire-stability
+of `/agents/edges` preserved; cross-references surface separately.
 
 #### ADR-014: Cross-Reference Strategy for Mailbox-Edges and Live-Tail Events
 
