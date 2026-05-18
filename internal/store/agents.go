@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -583,6 +584,206 @@ func (s *Store) AgentVerdictsBySpawn(ctx context.Context, spawnID string) ([]Age
 		return nil, fmt.Errorf("store: agent verdicts by spawn rows: %w", err)
 	}
 	return out, nil
+}
+
+// -----------------------------------------------------------------------------
+// Phase 2d S5 — Mailbox-Edge read-surface for the dashboard "Agents" tab
+// and the new GET /agents/edges endpoint.
+//
+// Two additive read methods drive the in/out edge listing on
+// /agents/edges?spawn_id=… plus the per-spawn-row edges sub-list in the
+// dashboard tab (internal/dashboard/agents.go):
+//
+//   - AgentEdgesForSpawn      — both in-edges (to_spawn=spawn) and
+//                               out-edges (from_spawn=spawn) for a given
+//                               spawn_id, ordered ts ASC, id ASC
+//   - AgentEdgesForSpawnIDs   — multi-spawn batch variant for the
+//                               dashboard page render (avoids one
+//                               round-trip per visible row)
+//
+// The write surface (InsertAgentMailboxEdge) already exists since S1 —
+// edges are persisted today, only read access was missing.
+
+// AgentMailboxEdgeRow is one agent_mailbox_edges row returned by the
+// read methods. All four FK + enum + ts fields are eagerly populated;
+// there are no NULL-able columns on this table.
+type AgentMailboxEdgeRow struct {
+	ID          int64
+	FromSpawnID string
+	ToSpawnID   string
+	EdgeType    string
+	TS          time.Time
+}
+
+// AgentEdgesForSpawn returns the in-edges (rows whose to_spawn_id == spawnID)
+// and out-edges (rows whose from_spawn_id == spawnID) for the given spawn,
+// each ordered ts ASC, id ASC (stable on the UNIQUE (from,to,type,ts) tuple
+// when timestamps collide). Empty result for either direction is `nil, nil`.
+//
+// Self-loops (from == to == spawnID) appear in BOTH slices — by design,
+// because the same row is semantically both "spawn delegating to itself"
+// and "spawn receiving from itself" (rare in practice, but the schema
+// has no CHECK against it and the caller deserves to see the row from
+// either query direction).
+func (s *Store) AgentEdgesForSpawn(ctx context.Context, spawnID string) (in []AgentMailboxEdgeRow, out []AgentMailboxEdgeRow, err error) {
+	if spawnID == "" {
+		return nil, nil, fmt.Errorf("store: agent edges for spawn: id required")
+	}
+	in, err = s.queryAgentEdges(ctx, `
+		SELECT id, from_spawn_id, to_spawn_id, edge_type, ts
+		FROM agent_mailbox_edges
+		WHERE to_spawn_id = ?
+		ORDER BY ts ASC, id ASC
+	`, spawnID)
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err = s.queryAgentEdges(ctx, `
+		SELECT id, from_spawn_id, to_spawn_id, edge_type, ts
+		FROM agent_mailbox_edges
+		WHERE from_spawn_id = ?
+		ORDER BY ts ASC, id ASC
+	`, spawnID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return in, out, nil
+}
+
+// AgentEdgesForSpawnIDs returns edges where either endpoint is in the
+// supplied spawn-id set, keyed by spawn-id with both directions populated.
+// The dashboard agents tab uses this to attach in/out edge counts to
+// every visible row in a single round-trip rather than 2×N per-row calls.
+//
+// Empty / nil input → empty map, nil error. Duplicate spawn ids in the
+// input are de-duplicated on the result map.
+func (s *Store) AgentEdgesForSpawnIDs(ctx context.Context, spawnIDs []string) (map[string]AgentEdgeBundle, error) {
+	out := map[string]AgentEdgeBundle{}
+	if len(spawnIDs) == 0 {
+		return out, nil
+	}
+	// Build the placeholder list. modernc.org/sqlite caps at 999 host
+	// parameters; the dashboard page size tops out at 500 so we are
+	// comfortably under the limit, but we still guard against larger
+	// callers by chunking.
+	const chunkSize = 500
+	for start := 0; start < len(spawnIDs); start += chunkSize {
+		end := start + chunkSize
+		if end > len(spawnIDs) {
+			end = len(spawnIDs)
+		}
+		chunk := spawnIDs[start:end]
+		if err := s.appendAgentEdgesForSpawnChunk(ctx, chunk, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// AgentEdgeBundle bundles the in / out edges for one spawn — symmetrical
+// to the (in, out) tuple returned by AgentEdgesForSpawn.
+type AgentEdgeBundle struct {
+	In  []AgentMailboxEdgeRow
+	Out []AgentMailboxEdgeRow
+}
+
+// appendAgentEdgesForSpawnChunk runs the two batched queries for one
+// chunk of spawn ids and merges the rows into the supplied result map.
+func (s *Store) appendAgentEdgesForSpawnChunk(ctx context.Context, chunk []string, out map[string]AgentEdgeBundle) error {
+	placeholders := strings.Repeat("?,", len(chunk))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(chunk))
+	for i, id := range chunk {
+		args[i] = id
+	}
+
+	// in-edges: to_spawn_id IN (...)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, from_spawn_id, to_spawn_id, edge_type, ts
+		FROM agent_mailbox_edges
+		WHERE to_spawn_id IN (`+placeholders+`)
+		ORDER BY ts ASC, id ASC
+	`, args...)
+	if err != nil {
+		return fmt.Errorf("store: agent edges in-batch: %w", err)
+	}
+	if err := scanEdgeRowsInto(rows, func(r AgentMailboxEdgeRow) {
+		b := out[r.ToSpawnID]
+		b.In = append(b.In, r)
+		out[r.ToSpawnID] = b
+	}); err != nil {
+		return err
+	}
+
+	// out-edges: from_spawn_id IN (...)
+	rows, err = s.db.QueryContext(ctx, `
+		SELECT id, from_spawn_id, to_spawn_id, edge_type, ts
+		FROM agent_mailbox_edges
+		WHERE from_spawn_id IN (`+placeholders+`)
+		ORDER BY ts ASC, id ASC
+	`, args...)
+	if err != nil {
+		return fmt.Errorf("store: agent edges out-batch: %w", err)
+	}
+	return scanEdgeRowsInto(rows, func(r AgentMailboxEdgeRow) {
+		b := out[r.FromSpawnID]
+		b.Out = append(b.Out, r)
+		out[r.FromSpawnID] = b
+	})
+}
+
+// queryAgentEdges runs a single edge-select and returns the rows. Used
+// by AgentEdgesForSpawn for both in- and out-direction queries.
+func (s *Store) queryAgentEdges(ctx context.Context, query string, args ...any) ([]AgentMailboxEdgeRow, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: agent edges query: %w", err)
+	}
+	defer rows.Close()
+	var out []AgentMailboxEdgeRow
+	for rows.Next() {
+		r, err := scanAgentEdgeRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: agent edges rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanEdgeRowsInto closes rows after consuming them, decoding each one
+// and calling sink for the side effect. Centralises the row-scan +
+// rows.Err() pattern so the batched-query path is shorter to read.
+func scanEdgeRowsInto(rows *sql.Rows, sink func(AgentMailboxEdgeRow)) error {
+	defer rows.Close()
+	for rows.Next() {
+		r, err := scanAgentEdgeRow(rows)
+		if err != nil {
+			return err
+		}
+		sink(r)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: agent edges rows: %w", err)
+	}
+	return nil
+}
+
+// scanAgentEdgeRow extracts one AgentMailboxEdgeRow from a *sql.Rows
+// cursor. Mirrors scanAgentSpawnRow's style.
+func scanAgentEdgeRow(rows *sql.Rows) (AgentMailboxEdgeRow, error) {
+	var (
+		r      AgentMailboxEdgeRow
+		tsNano int64
+	)
+	if err := rows.Scan(&r.ID, &r.FromSpawnID, &r.ToSpawnID, &r.EdgeType, &tsNano); err != nil {
+		return AgentMailboxEdgeRow{}, fmt.Errorf("store: scan agent edge: %w", err)
+	}
+	r.TS = time.Unix(0, tsNano)
+	return r, nil
 }
 
 // scanAgentSpawnRow extracts one AgentSpawnRow from a *sql.Rows cursor.
