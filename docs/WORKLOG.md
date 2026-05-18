@@ -1,7 +1,7 @@
 ---
 type: worklog
 projekt: tracelab
-status: phase-2d-sammel-gate-gruen — **Sammel-Gate Phase 2d gesamt freigabe/minor** (`qs-20260518-002`). 1 Minor VC-001-KON ARCH-Z.2072 Doku-Drift bereits lead-direktarbeit-gefixt vor FF-Merge. Alle 6 Sub-Sprints S0-S5+S5-Tail (#031-#036-#037) durch, alle 4 Domain-Punkte adressiert (Spawn-Tree + Token-Usage + Verdict+Lerneffekt + Mailbox-Edges+Cross-Refs) + Phase-3-Bookmark für Transcript-Tail-Event-Ref-Marker-Heuristik. **FF-Merge-Ready** — wartet auf Admin-Approval.
+status: phase-2d-gemerged — **Phase 2d KOMPLETT gemerged nach `main`** (FF-Merge `a8ed459` per `--ff-only`, 49 Commits Phase-2d-Chain). Branch `feat/phase-2d-agents` lokal+remote gelöscht. 4 Domain-Punkte adressiert + Phase-3-Bookmark (Transcript-Tail-Event-Ref-Marker-Heuristik). KI-Agenten-Stack live als 2. Daten-Domain im Dashboard. **PAUSE** — keine nächste Phase eröffnet.
 last-updated: 2026-05-18
 qs-letzter-lauf: qs-20260518-002
 phase-1-merge-commit: cee7a5d
@@ -10,7 +10,8 @@ phase-2a-merge-commit: bdc3a0c
 phase-2b-merge-commit: cb249bd
 phase-2c-merge-commit: fca19d0
 phase-2-tail-merge-commit: 563ec27
-aktiver-auftrag: "#037 — Phase-2d Sammel-Gate freigabe/minor, FF-Merge-Approval pending"
+phase-2d-merge-commit: a8ed459
+aktiver-auftrag: "(none — Phase 2d gemerged, Pause)"
 ---
 
 # WORKLOG — VibeCoding — Tracelab
