@@ -2013,3 +2013,190 @@ hub at start-up and confirmed the wire shape end-to-end: `1000 +
 1100 + 1050 = 3150` cross-source total, three populated
 `by_source` keys, BFS-ordered tree depth=0/1, freigabe verdict
 with Lerneffekt rendered in the tab body.
+
+### Mailbox-Edges (S5 implementation)
+
+Phase 2d S5 (Auftrag #036) closes the loop on the fourth schema
+table — `agent_mailbox_edges`. The table itself has been live since
+S1's migration 0003 and the four `mailbox_edges[]` ingest paths
+(SDK-hook envelope field, transcript-tail extraction, MCP-Push
+tool argument) were all in place by S3. What S5 adds:
+
+1. **Transcript-tail edge extraction.** Until S5 the transcript
+   bridge only emitted spawns/tokens/verdicts. S5 makes
+   `parseTranscriptLine` additionally emit `spawn` edges
+   (`parent_spawn → child_spawn`) whenever a parent assistant
+   message contains an `Agent` / `Task` / `Skill` tool_use, and
+   `return` edges (`subagent → parent_spawn`) whenever a parent-
+   stream `toolUseResult.{agentId,status,…}` record terminates a
+   subagent. The bridge's `persistEvent` dispatch grew a fourth
+   branch that calls `store.InsertAgentMailboxEdge`. Idempotency
+   is identical to the other transcript flows — repeat-tail re-emits
+   the same edge tuple, `INSERT OR IGNORE` on the UNIQUE
+   `(from, to, type, ts)` index makes the second write a no-op.
+2. **Read surface — `GET /agents/edges?spawn_id=…`.** A fifth read
+   endpoint in the `AgentsReadMux` overlay (`internal/agents/read.go`),
+   returning two parallel slices `{ "in": [...], "out": [...] }`.
+   `in` carries every row whose `to_spawn_id` matches the spawn;
+   `out` carries every row whose `from_spawn_id` matches. Both
+   slices ordered `ts` ASC, `id` ASC. Empty slices are emitted as
+   `[]`, never `null` — the dashboard JS reads `.length` without a
+   nil-guard.
+3. **Store-layer batch read.** `store.AgentEdgesForSpawnIDs` is the
+   batched-fetch counterpart of `AgentEdgesForSpawn` — one IN-query
+   per direction covers every visible spawn on a dashboard page in
+   two roundtrips total (rather than 2 × N per-row calls). Used by
+   the dashboard tab handler; the `/agents/edges` endpoint uses the
+   simpler `AgentEdgesForSpawn` because consumers always ask for one
+   spawn at a time.
+4. **Dashboard "Edges" column.** A new rightmost column on the
+   Agents tab surfaces the in / out edges as a sub-list, one row per
+   edge (`←` direction marker for in-edges, `→` for out-edges,
+   followed by `<edge_type>` and the counterpart spawn id). Same
+   visual posture as the per-source token breakdown (`tl-agent-edge-list`
+   CSS class mirrors `tl-agent-source-list`).
+5. **Client method `AgentsEdges(ctx, spawnID)`.** Wire types
+   `AgentEdgeRow` + `AgentEdges` in `internal/client/agents.go`.
+   Nil-slice → empty-slice substitution matches the other read
+   methods (`AgentsSessions`, `AgentsTokens`, etc).
+
+**SDK-Hook edge emission is deliberately out of scope for S5.** The
+hook script (`scripts/agent-hook.sh`) is Nicoletti-domain (Bash /
+hook plumbing); the wire envelope already accepts a `mailbox_edges[]`
+array from sdk-hook, but the script does not currently populate it.
+This is documented as a Phase-2d-tail/Phase-3 follow-up. The schema
+test `TestAgentsIngestThreeSourceEdgesCollapseOnUniqueTuple` pins
+that the wire path works for sdk-hook today; only the hook script
+itself needs to learn to emit edges, no schema change required.
+
+**Cross-References to live-tail events** — see ADR-014 (Proposed,
+status awaits Admin/Chakotay decision). The S5 `/agents/edges`
+endpoint deliberately ships in the simpler shape (in/out only) so
+the data is consumable today and a future field-addition (e.g.
+`event_refs`) stays backwards-compatible on top.
+
+#### ADR-014: Cross-Reference Strategy for Mailbox-Edges and Live-Tail Events
+
+**Status:** Proposed (eröffnet 2026-05-18, wartet auf Admin-Confirm)
+
+##### Context
+
+Phase 2d S5 ships mailbox-edges between agent spawns as a read-surface
+(`GET /agents/edges`). The follow-up question — how the agent-tree
+should link to the live-tail event stream (the WS `/tail` events from
+Phase 1, which surface app-log events from `events.id`) — is open. Two
+concrete options have surfaced; both are implementable in Phase 3, but
+the schema implications differ and the choice impacts the long-term
+schema chain (whether migration 0005 is invasive or additive).
+
+Live-tail events (`events.id`) ARE referenceable: `events.id INTEGER
+PRIMARY KEY AUTOINCREMENT` (migration 0001) is a stable primary key
+suitable as an FK target. The two options below differ in how the
+cross-reference is anchored: extending the existing `agent_mailbox_edges`
+table polymorphically vs. adding a separate `agent_event_refs` table.
+
+##### Options considered
+
+**(A) Single-table polymorphism — extend `agent_mailbox_edges`.**
+
+Add columns:
+- `target_type TEXT NOT NULL DEFAULT 'spawn' CHECK(target_type IN ('spawn','event'))`
+- `to_event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`
+- relax `to_spawn_id` to NULLABLE (or keep NOT NULL and require
+  `to_spawn_id` for `target_type='spawn'`, `to_event_id` for
+  `target_type='event'`)
+
+Pro: one table, one read query, dashboard sub-list iterates a single
+collection. Migration 0005 is conceptually small. The existing
+`AgentEdgesForSpawn` query gets a `target_type` column added to the
+SELECT and a CASE in the wire shape.
+
+Con: the schema becomes polymorphic — `to_spawn_id` and `to_event_id`
+are mutually exclusive but the schema cannot express that without a
+CHECK across two columns. The CASCADE-delete semantics differ between
+spawn-targets and event-targets, which makes the constraint
+declarations more delicate. Rollback (.down migration) requires
+preserving non-spawn rows somewhere — destructive otherwise.
+
+**(B) Separate `agent_event_refs` table.**
+
+Add a fresh table:
+```sql
+CREATE TABLE agent_event_refs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    spawn_id     TEXT    NOT NULL REFERENCES agent_spawns(id) ON DELETE CASCADE,
+    event_id     INTEGER NOT NULL REFERENCES events(id)        ON DELETE CASCADE,
+    ref_type     TEXT    NOT NULL CHECK(ref_type IN ('observed','context','caused-by')),
+    ts           INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_agent_event_refs_uniq ON agent_event_refs(spawn_id, event_id, ref_type, ts);
+CREATE INDEX        idx_agent_event_refs_spawn ON agent_event_refs(spawn_id);
+CREATE INDEX        idx_agent_event_refs_event ON agent_event_refs(event_id);
+```
+
+Pro: clean relational separation — `agent_mailbox_edges` stays a
+spawn-to-spawn graph (what it always was), `agent_event_refs` is a
+new spawn-to-event bridge. Both tables have non-NULL FKs. Migration
+0005 is purely additive — no column-relaxation, no polymorphic CHECK,
+no destructive rollback. The read API grows one new endpoint
+(`/agents/event_refs?spawn_id=…`) without touching `/agents/edges`.
+
+Con: two read queries for the dashboard's "show me everything this
+spawn touched" view (one for edges, one for event-refs). The
+dashboard merge happens client-side or in the dashboard handler,
+which is trivial but adds 10-20 lines of glue.
+
+##### Lead-Empfehlung (ballard)
+
+**Option B.** Three reasons:
+
+1. **Additive vs. destructive migration.** Option A requires either
+   relaxing `to_spawn_id` to NULL (column change with rollback risk —
+   data loss potential when the migration is reversed) or
+   adding cross-column CHECKs that SQLite supports but make the
+   schema's intent less obvious to a future reader. Option B is a
+   single `CREATE TABLE`; rollback is a single `DROP TABLE` and the
+   data loss is bounded to the new feature.
+2. **Domain clarity.** Spawn-to-spawn edges (mailbox) and spawn-to-
+   event references (cross-domain) are semantically different kinds
+   of relationship — one is agent-to-agent, the other is agent-to-
+   app-log. Conflating them in one table forces every read consumer
+   to filter by `target_type` even when they only care about one
+   kind. Option B keeps each table single-purpose.
+3. **Read-API surface stability.** `/agents/edges` is shipped in S5
+   with the simple in/out shape. Option A would require either
+   breaking that shape (adding `target_type` + `to_event_id` to
+   `EdgeRowWire`) or maintaining two diverging read endpoints with
+   the same prefix. Option B leaves `/agents/edges` exactly as it
+   is and adds `/agents/event_refs` as a sibling.
+
+##### Decision
+
+*(filled in upon Admin-Confirm — see Lead-Empfehlung in §Context above)*
+
+##### Consequences
+
+*Pending Decision.* The implementation pathway differs by option:
+
+- Option A → migration 0005 modifies `agent_mailbox_edges`; the
+  `EdgeRowWire` JSON shape grows two fields; the dashboard renders
+  one merged sub-list with type-aware icons.
+- Option B → migration 0005 creates `agent_event_refs` as a new
+  table; a new client method `AgentsEventRefs(ctx, spawnID)`; a
+  new dashboard sub-list adjacent to (not merged with) the
+  mailbox-edges sub-list.
+
+Either way, the live-tail WS stream is not directly affected — both
+options operate purely on the persisted side. The hub's
+`Hub.Publish` path keeps publishing `events.id`-bearing app-log
+events to subscribers; only the read side queries the new
+cross-reference.
+
+##### Wire-Compat-Statement
+
+Whichever option is accepted, the existing read-surface
+`/agents/edges` MUST stay backwards-compatible. New cross-reference
+data is exposed via either an additional field
+(`event_refs: [...]` next to `in:`/`out:` in Option A's merged
+shape) or an additional endpoint (`/agents/event_refs` in Option B)
+— never by repurposing or removing existing fields.
