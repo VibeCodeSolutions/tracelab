@@ -87,11 +87,16 @@ type AgentMailboxEdge struct {
 // inserted vs collapsed by the INSERT OR IGNORE idempotency guard.
 // A handler returns this in the /agents/ingest response body so
 // operators can audit per-call whether a re-push was a no-op.
+//
+// EventRefs added Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+// Older consumers see a JSON envelope with a new `event_refs` field of
+// value 0 — backwards-compatible additive shape change.
 type AgentInsertResult struct {
 	Spawns       int64 `json:"spawns"`
 	Tokens       int64 `json:"tokens"`
 	Verdicts     int64 `json:"verdicts"`
 	MailboxEdges int64 `json:"mailbox_edges"`
+	EventRefs    int64 `json:"event_refs"`
 }
 
 // InsertAgentSpawn writes (or ignores) a single spawn row. The writer
@@ -843,5 +848,119 @@ func scanAgentSpawnRowFromRow(row *sql.Row) (AgentSpawnRow, error) {
 		v := sessionRef.String
 		r.SessionRef = &v
 	}
+	return r, nil
+}
+
+// -----------------------------------------------------------------------------
+// Phase 2d S5-Tail — agent_event_refs (ADR-014 Accepted, Option B).
+//
+// Cross-domain bridge: an agent_spawns row references an events row from
+// the app-log domain. The write surface is a single Insert method, and
+// the read surface mirrors the mailbox-edges read shape (a single-spawn
+// read for the /agents/event_refs endpoint, no batch variant — the
+// dashboard sub-list is per-row and uses the single-spawn read since
+// event-refs are expected to be sparse compared to mailbox-edges).
+//
+// Idempotency mirrors agent_mailbox_edges: UNIQUE (spawn_id, event_id,
+// ref_type, ts) lets all three ingest sources (sdk-hook / transcript /
+// mcp-push) write the same reference and collapse to one row via
+// INSERT OR IGNORE.
+
+// AgentEventRef is one agent_event_refs row at the writer side. The
+// id column is AUTOINCREMENT; callers do not supply it.
+type AgentEventRef struct {
+	SpawnID string
+	EventID int64
+	RefType string
+	TS      time.Time
+}
+
+// AgentEventRefRow is one agent_event_refs row at the reader side.
+// ID is the AUTOINCREMENT primary key.
+type AgentEventRefRow struct {
+	ID      int64
+	SpawnID string
+	EventID int64
+	RefType string
+	TS      time.Time
+}
+
+// InsertAgentEventRef writes (or ignores) a single agent_event_refs row.
+// UNIQUE tuple is (spawn_id, event_id, ref_type, ts) — a repeat-call
+// from the same or a different source is silently a no-op via
+// INSERT OR IGNORE. Both FKs must exist (spawn_id → agent_spawns.id,
+// event_id → events.id); FK violations surface as a non-nil error.
+func (s *Store) InsertAgentEventRef(ctx context.Context, ref AgentEventRef) (int64, error) {
+	if ref.SpawnID == "" {
+		return 0, fmt.Errorf("store: agent event ref spawn_id required")
+	}
+	if ref.EventID <= 0 {
+		return 0, fmt.Errorf("store: agent event ref event_id required")
+	}
+	if ref.RefType == "" {
+		return 0, fmt.Errorf("store: agent event ref ref_type required")
+	}
+	ts := ref.TS
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	res, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO agent_event_refs(
+			spawn_id, event_id, ref_type, ts
+		) VALUES(?, ?, ?, ?)
+	`, ref.SpawnID, ref.EventID, ref.RefType, ts.UnixNano())
+	if err != nil {
+		return 0, fmt.Errorf("store: insert agent event ref: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: insert agent event ref rows: %w", err)
+	}
+	return n, nil
+}
+
+// AgentEventRefsForSpawn returns every agent_event_refs row attached to
+// the given spawn, ordered ts ASC, id ASC (stable on the UNIQUE tuple
+// when timestamps collide). Empty result is `nil, nil` — same convention
+// as the mailbox-edge reads.
+func (s *Store) AgentEventRefsForSpawn(ctx context.Context, spawnID string) ([]AgentEventRefRow, error) {
+	if spawnID == "" {
+		return nil, fmt.Errorf("store: agent event refs for spawn: id required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, spawn_id, event_id, ref_type, ts
+		FROM agent_event_refs
+		WHERE spawn_id = ?
+		ORDER BY ts ASC, id ASC
+	`, spawnID)
+	if err != nil {
+		return nil, fmt.Errorf("store: agent event refs query: %w", err)
+	}
+	defer rows.Close()
+	var out []AgentEventRefRow
+	for rows.Next() {
+		r, err := scanAgentEventRefRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: agent event refs rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanAgentEventRefRow extracts one AgentEventRefRow from a *sql.Rows
+// cursor. Mirrors scanAgentEdgeRow's style.
+func scanAgentEventRefRow(rows *sql.Rows) (AgentEventRefRow, error) {
+	var (
+		r      AgentEventRefRow
+		tsNano int64
+	)
+	if err := rows.Scan(&r.ID, &r.SpawnID, &r.EventID, &r.RefType, &tsNano); err != nil {
+		return AgentEventRefRow{}, fmt.Errorf("store: scan agent event ref: %w", err)
+	}
+	r.TS = time.Unix(0, tsNano)
 	return r, nil
 }
