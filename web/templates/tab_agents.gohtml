@@ -19,8 +19,10 @@
        / "Eskalation") plus the Lerneffekt markdown note (rendered as
        plain text in S4 — full markdown render is out-of-scope).
 
-  Mailbox-edges + cross-references to the live-tail event stream are
-  explicitly S5 scope (the Phase-2d sammel-gate) and not surfaced here.
+  Mailbox-edges (in / out, edge-type, counterpart spawn) are surfaced
+  as a per-row sub-list in the rightmost column since Phase 2d S5.
+  Cross-references from mailbox edges to live-tail events (events.id)
+  are still pending an architecture decision — see ADR-014 (Proposed).
 
   Dot value: agentsViewData (agents.go).
 */}}
@@ -81,6 +83,7 @@
             <th>Sources</th>
             <th>Verdict</th>
             <th>Lerneffekt</th>
+            <th>Edges</th>
           </tr>
         </thead>
         <tbody>
@@ -127,6 +130,20 @@
                     <summary class="tl-muted">Lerneffekt</summary>
                     <pre class="tl-agent-lerneffekt">{{.LerneffektMD}}</pre>
                   </details>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+              <td>
+                {{if or .EdgesIn .EdgesOut}}
+                  <ul class="tl-agent-edge-list">
+                    {{range .EdgesIn}}
+                      <li><span class="tl-muted">←</span> <span class="tl-mono">{{.EdgeType}}</span> from <span class="tl-mono">{{.Counterpart}}</span></li>
+                    {{end}}
+                    {{range .EdgesOut}}
+                      <li><span class="tl-muted">→</span> <span class="tl-mono">{{.EdgeType}}</span> to <span class="tl-mono">{{.Counterpart}}</span></li>
+                    {{end}}
+                  </ul>
                 {{else}}
                   <span class="tl-muted">—</span>
                 {{end}}

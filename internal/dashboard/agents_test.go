@@ -287,6 +287,54 @@ func TestAgentsTabPaginationAndFilter(t *testing.T) {
 
 // TestAgentsTabRendersParentChildTree pins the depth-indent path: a
 // parent spawn on the same page as its child renders the child with
+// seedEdge inserts one mailbox-edge row. Phase 2d S5.
+func seedEdge(t *testing.T, st *store.Store, from, to, edgeType string, ts time.Time) {
+	t.Helper()
+	if _, err := st.InsertAgentMailboxEdge(context.Background(), store.AgentMailboxEdge{
+		FromSpawnID: from,
+		ToSpawnID:   to,
+		EdgeType:    edgeType,
+		TS:          ts,
+	}); err != nil {
+		t.Fatalf("seed edge %s→%s/%s: %v", from, to, edgeType, err)
+	}
+}
+
+// TestAgentsTabRendersEdgesSubList verifies the S5 mailbox-edges
+// column: a spawn with in- and out-edges renders both directions in
+// the sub-list, the counterpart-spawn ids appear in the HTML, and the
+// edge_type strings are surfaced (one rendered per row).
+func TestAgentsTabRendersEdgesSubList(t *testing.T) {
+	env := newAgentsTestEnv(t)
+	now := time.Now()
+
+	parentID := padSpawnID("edgesparent")
+	childID := padSpawnID("edgeschild")
+	seedSpawn(t, env.st, parentID, "", "belanna", "tracelab", now)
+	seedSpawn(t, env.st, childID, parentID, "ballard", "tracelab", now.Add(time.Second))
+	seedEdge(t, env.st, parentID, childID, "spawn", now)
+	seedEdge(t, env.st, childID, parentID, "return", now.Add(2*time.Second))
+
+	resp, err := http.Get(env.srv.URL + "/dashboard/tab/agents")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+
+	if !strings.Contains(s, `class="tl-agent-edge-list"`) {
+		t.Errorf("edges sub-list class missing; body:\n%s", s)
+	}
+	if !strings.Contains(s, "spawn") || !strings.Contains(s, "return") {
+		t.Errorf("edge_type strings missing; body:\n%s", s)
+	}
+	// Both spawn ids must appear (each as counterpart on the other row).
+	if !strings.Contains(s, parentID) || !strings.Contains(s, childID) {
+		t.Errorf("both spawn ids must appear in edge sub-list; body:\n%s", s)
+	}
+}
+
 // the tree-glyph indent ("└─") prefix.
 func TestAgentsTabRendersParentChildTree(t *testing.T) {
 	env := newAgentsTestEnv(t)

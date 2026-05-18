@@ -78,6 +78,18 @@ type agentSpawnRow struct {
 	Verdict          string                // latest verdict's text, e.g. "freigabe"
 	VerdictHuman     string                // capitalised display form
 	LerneffektMD     string                // raw markdown (rendered as plain text in S4)
+	EdgesIn          []agentEdgeSide       // S5 — in-edges (rows pointing AT this spawn)
+	EdgesOut         []agentEdgeSide       // S5 — out-edges (rows pointing AWAY from this spawn)
+}
+
+// agentEdgeSide is one row in the in/out edges sub-list. Counterpart is
+// the OTHER endpoint of the edge (the from-side for in-edges, the
+// to-side for out-edges) so the template renders one identifier per
+// row without per-row direction lookup.
+type agentEdgeSide struct {
+	EdgeType    string
+	Counterpart string // the spawn id at the OTHER end of the edge
+	TSHuman     string
 }
 
 // agentTokenSourceRow is one per-source aggregate inside the spawn row.
@@ -221,7 +233,24 @@ func (h *Handler) buildAgentsViewData(ctx context.Context, rows []store.AgentSpa
 	// depth 0 (treated as a virtual root for layout purposes).
 	depth := computeVisiblePageDepth(rows)
 
+	// Phase 2d S5 — batched edge fetch for the visible page. One
+	// IN-query and one OUT-query covers every visible spawn instead
+	// of 2×N per-row roundtrips. Empty rows → empty result, no error.
+	visibleIDs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		visibleIDs = append(visibleIDs, r.ID)
+	}
+	edgesByID, err := h.store.AgentEdgesForSpawnIDs(ctx, visibleIDs)
+	if err != nil {
+		// Non-fatal — render the page without edges plus a partial
+		// error card. Mirrors the per-row tokens/verdicts handling.
+		edgesByID = map[string]store.AgentEdgeBundle{}
+	}
+
 	var errMsg string
+	if err != nil {
+		errMsg = fmt.Sprintf("edges lookup failed: %v", err)
+	}
 	for _, r := range rows {
 		row := agentSpawnRow{
 			ID:             r.ID,
@@ -263,6 +292,26 @@ func (h *Handler) buildAgentsViewData(ctx context.Context, rows []store.AgentSpa
 			row.Verdict = latest.Verdict
 			row.VerdictHuman = formatVerdictLabel(latest.Verdict)
 			row.LerneffektMD = latest.LerneffektMD
+		}
+
+		// Attach the per-spawn edges from the batched fetch. EdgesIn
+		// records arrive AT this spawn (counterpart = from-side);
+		// EdgesOut records leave this spawn (counterpart = to-side).
+		if bundle, ok := edgesByID[r.ID]; ok {
+			for _, e := range bundle.In {
+				row.EdgesIn = append(row.EdgesIn, agentEdgeSide{
+					EdgeType:    e.EdgeType,
+					Counterpart: e.FromSpawnID,
+					TSHuman:     formatHumanTime(e.TS),
+				})
+			}
+			for _, e := range bundle.Out {
+				row.EdgesOut = append(row.EdgesOut, agentEdgeSide{
+					EdgeType:    e.EdgeType,
+					Counterpart: e.ToSpawnID,
+					TSHuman:     formatHumanTime(e.TS),
+				})
+			}
 		}
 
 		out.Spawns = append(out.Spawns, row)
