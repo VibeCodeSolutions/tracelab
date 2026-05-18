@@ -84,6 +84,11 @@ type AgentEventInput struct {
 	Tokens       []agentEventTokens      `json:"tokens,omitempty"`
 	Verdicts     []agentEventVerdict     `json:"verdicts,omitempty"`
 	MailboxEdges []agentEventMailboxEdge `json:"mailbox_edges,omitempty"`
+	// EventRefs added Phase 2d S5-Tail (ADR-014 Accepted, Option B).
+	// Cross-domain bridge from the spawn to an events row from the
+	// app-log domain. Additive optional array, mirrors the mailbox_edges
+	// pattern from S3. Older callers simply omit the field.
+	EventRefs []agentEventEventRef `json:"event_refs,omitempty"`
 }
 
 type agentEventSpawn struct {
@@ -117,6 +122,16 @@ type agentEventMailboxEdge struct {
 	ToSpawnID   string `json:"to_spawn_id"`
 	EdgeType    string `json:"edge_type"`
 	TS          int64  `json:"ts"`
+}
+
+// agentEventEventRef mirrors internal/agents.EventRefPayload (Phase 2d
+// S5-Tail, ADR-014 Accepted, Option B). All four fields are required;
+// ref_type must be one of "observed" | "context" | "caused-by".
+type agentEventEventRef struct {
+	SpawnID string `json:"spawn_id"`
+	EventID int64  `json:"event_id"`
+	RefType string `json:"ref_type"`
+	TS      int64  `json:"ts"`
 }
 
 // agentEventResult is the public output envelope. JSON-encoded into
@@ -153,6 +168,9 @@ func newAgentEventTool(c *client.Client) server.ServerTool {
 		),
 		mcp.WithArray("mailbox_edges",
 			mcp.Description("Mailbox relations between spawns. Edge type must be one of spawn|return|escalate|delegate."),
+		),
+		mcp.WithArray("event_refs",
+			mcp.Description("Cross-domain references from the spawn to an events row (app-log). Each entry needs spawn_id, event_id (positive integer FK to events.id), ref_type (observed|context|caused-by), and ts (unix-nano)."),
 		),
 	)
 	return server.ServerTool{
@@ -193,9 +211,10 @@ func agentEventHandler(c *client.Client) server.ToolHandlerFunc {
 		}
 
 		if in.Spawn == nil && len(in.Tokens) == 0 &&
-			len(in.Verdicts) == 0 && len(in.MailboxEdges) == 0 {
+			len(in.Verdicts) == 0 && len(in.MailboxEdges) == 0 &&
+			len(in.EventRefs) == 0 {
 			return mcp.NewToolResultError(
-				"payload is empty (need at least one of spawn|tokens|verdicts|mailbox_edges)",
+				"payload is empty (need at least one of spawn|tokens|verdicts|mailbox_edges|event_refs)",
 			), nil
 		}
 
@@ -243,6 +262,17 @@ func agentEventHandler(c *client.Client) server.ToolHandlerFunc {
 					ToSpawnID:   e.ToSpawnID,
 					EdgeType:    e.EdgeType,
 					TS:          e.TS,
+				}
+			}
+		}
+		if len(in.EventRefs) > 0 {
+			payload.EventRefs = make([]client.AgentIngestEventRef, len(in.EventRefs))
+			for i, er := range in.EventRefs {
+				payload.EventRefs[i] = client.AgentIngestEventRef{
+					SpawnID: er.SpawnID,
+					EventID: er.EventID,
+					RefType: er.RefType,
+					TS:      er.TS,
 				}
 			}
 		}
