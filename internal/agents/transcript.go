@@ -145,12 +145,19 @@ type transcriptToolResult struct {
 }
 
 // transcriptEvent is the bridge's internal event type after parsing one
-// transcript record. Exactly one of Spawn/Tokens/Verdict is populated.
+// transcript record. Exactly one of Spawn/Tokens/Verdict/Edge is populated.
 // SourceFile + Offset are kept for debug logging.
+//
+// Edge events were added in Phase 2d S5 — Agent/Task/Skill tool_use
+// entries in an assistant message imply a directed edge from the
+// owning spawn to the new child spawn (edge_type="spawn"). toolUseResult
+// records on the parent stream additionally imply a "return" edge from
+// the finished subagent back up to the parent.
 type transcriptEvent struct {
 	Spawn   *store.AgentSpawn
 	Tokens  *store.AgentTokenUsage
 	Verdict *store.AgentVerdict
+	Edge    *store.AgentMailboxEdge
 }
 
 // parseTranscriptLine maps one JSONL line to zero, one, or more
@@ -219,6 +226,19 @@ func parseTranscriptLine(line []byte) ([]transcriptEvent, error) {
 				TS:      ts,
 			}})
 		}
+		// Mailbox-edge: the subagent returned to its parent. The
+		// PARENT-side spawn id (spawnID, derived from this record's
+		// sessionId / agentId) is the receiver of the return edge.
+		// FK precondition: both spawn rows must exist; the parent
+		// row is emitted later in this function (hasOwnerChild branch),
+		// the child row is the InsertOrIgnore-safe spawn we prepended
+		// just above.
+		events = append(events, transcriptEvent{Edge: &store.AgentMailboxEdge{
+			FromSpawnID: subSpawnID,
+			ToSpawnID:   spawnID,
+			EdgeType:    "return",
+			TS:          ts,
+		}})
 		// The toolUseResult also carries aggregate token totals — emit
 		// them as a token event under the subagent's id. These are
 		// per-spawn summaries, not per-message deltas, but the
@@ -280,8 +300,9 @@ func parseTranscriptLine(line []byte) ([]transcriptEvent, error) {
 			if c.Input != nil && c.Input.Description != "" {
 				skill = c.Input.Description
 			}
+			childSpawnID := spawnFromToolUseID(c.ID, spawnID)
 			spawn := store.AgentSpawn{
-				ID:         spawnFromToolUseID(c.ID, spawnID),
+				ID:         childSpawnID,
 				ParentID:   spawnID,
 				Skill:      skill,
 				StartedAt:  ts,
@@ -295,6 +316,16 @@ func parseTranscriptLine(line []byte) ([]transcriptEvent, error) {
 			SessionRef: "",
 			}
 			events = append(events, transcriptEvent{Spawn: &spawn})
+			// Mailbox-edge: parent spawning child. The owner-spawn row
+			// is prepended later in this function (hasOwnerChild),
+			// the child row is the InsertOrIgnore-safe spawn above —
+			// FK precondition holds when the edge insert runs.
+			events = append(events, transcriptEvent{Edge: &store.AgentMailboxEdge{
+				FromSpawnID: spawnID,
+				ToSpawnID:   childSpawnID,
+				EdgeType:    "spawn",
+				TS:          ts,
+			}})
 		}
 	}
 
@@ -312,6 +343,11 @@ func parseTranscriptLine(line []byte) ([]transcriptEvent, error) {
 		case e.Tokens != nil && e.Tokens.SpawnID == spawnID:
 			hasOwnerChild = true
 		case e.Verdict != nil && e.Verdict.SpawnID == spawnID:
+			hasOwnerChild = true
+		case e.Edge != nil && (e.Edge.FromSpawnID == spawnID || e.Edge.ToSpawnID == spawnID):
+			// Edges FK-back to the owning spawn from EITHER endpoint —
+			// the spawn-edge from parent originates at the owner, the
+			// return-edge from a subagent terminates at the owner.
 			hasOwnerChild = true
 		}
 	}
@@ -706,6 +742,16 @@ func (b *TranscriptBridge) persistEvent(ctx context.Context, e transcriptEvent) 
 		// stall the loop. A future tick will re-emit the verdict
 		// after the spawn row lands.
 		_, err := b.store.InsertAgentVerdict(ctx, *e.Verdict)
+		return err
+	case e.Edge != nil:
+		// Edges FK back to BOTH spawn endpoints (CASCADE delete on
+		// either side cleans the edge automatically). The parent +
+		// child spawn rows are emitted in the same event batch as the
+		// edge — the parseTranscriptLine event ordering guarantees
+		// they precede the edge insert. INSERT OR IGNORE on the
+		// (from, to, type, ts) UNIQUE tuple makes the edge insert
+		// idempotent against re-tails.
+		_, err := b.store.InsertAgentMailboxEdge(ctx, *e.Edge)
 		return err
 	}
 	return nil
