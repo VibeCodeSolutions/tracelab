@@ -365,3 +365,75 @@ func TestAgentsTabRendersParentChildTree(t *testing.T) {
 		t.Errorf("both parent and child must render; body:\n%s", s)
 	}
 }
+
+// TestAgentsTabRendersEventRefsSubList — Phase 2d S5-Tail (ADR-014
+// Accepted, Option B). A spawn with cross-domain event references
+// renders the dedicated "Event-Refs" sub-list (not merged with the
+// mailbox-edges sub-list — the ADR decision keeps the two domains
+// visually distinct). The ref_type pills surface, the event-id is
+// monospace-rendered, and the empty-cell fallback ("—") does not appear.
+func TestAgentsTabRendersEventRefsSubList(t *testing.T) {
+	env := newAgentsTestEnv(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	spawnID := padSpawnID("evtrefspn")
+	seedSpawn(t, env.st, spawnID, "", "ballard", "tracelab", now)
+
+	// Seed a session + event so the FK on event_refs.event_id has a target.
+	sessionID, err := env.st.CreateSession(ctx, "evtrefs-render")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := env.st.InsertEvents(ctx, sessionID, []store.Event{{
+		SessionID: sessionID,
+		TS:        now,
+		Source:    "app",
+		Level:     "warn",
+		Msg:       "tripwire",
+	}}); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	var eventID int64
+	if err := env.st.DB().QueryRowContext(ctx,
+		`SELECT id FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
+		sessionID,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("query event id: %v", err)
+	}
+	if _, err := env.st.InsertAgentEventRef(ctx, store.AgentEventRef{
+		SpawnID: spawnID, EventID: eventID, RefType: "caused-by", TS: now,
+	}); err != nil {
+		t.Fatalf("InsertAgentEventRef: %v", err)
+	}
+	if _, err := env.st.InsertAgentEventRef(ctx, store.AgentEventRef{
+		SpawnID: spawnID, EventID: eventID, RefType: "observed", TS: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("InsertAgentEventRef #2: %v", err)
+	}
+
+	resp, err := http.Get(env.srv.URL + "/dashboard/tab/agents")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+
+	if !strings.Contains(s, `class="tl-agent-event-ref-list"`) {
+		t.Errorf("event-refs sub-list class missing; body:\n%s", s)
+	}
+	// Both ref-type pill classes must surface.
+	if !strings.Contains(s, `tl-agent-event-ref-caused-by`) ||
+		!strings.Contains(s, `tl-agent-event-ref-observed`) {
+		t.Errorf("ref_type pill classes missing; body:\n%s", s)
+	}
+	// Event id is rendered as #<id>.
+	if !strings.Contains(s, `#`) {
+		t.Errorf("event-id marker missing; body:\n%s", s)
+	}
+	// The new Event-Refs column header must render.
+	if !strings.Contains(s, `<th>Event-Refs</th>`) {
+		t.Errorf("Event-Refs column header missing; body:\n%s", s)
+	}
+}

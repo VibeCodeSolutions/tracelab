@@ -80,6 +80,7 @@ type agentSpawnRow struct {
 	LerneffektMD     string                // raw markdown (rendered as plain text in S4)
 	EdgesIn          []agentEdgeSide       // S5 — in-edges (rows pointing AT this spawn)
 	EdgesOut         []agentEdgeSide       // S5 — out-edges (rows pointing AWAY from this spawn)
+	EventRefs        []agentEventRefSide   // S5-Tail — cross-domain refs to events.id (ADR-014)
 }
 
 // agentEdgeSide is one row in the in/out edges sub-list. Counterpart is
@@ -90,6 +91,16 @@ type agentEdgeSide struct {
 	EdgeType    string
 	Counterpart string // the spawn id at the OTHER end of the edge
 	TSHuman     string
+}
+
+// agentEventRefSide is one row in the event-refs sub-list. Adjacent to
+// (not merged with) the mailbox-edges sub-list — ADR-014 Decision keeps
+// the two domains visually separate so the operator's eye learns the
+// distinction (agent↔agent vs agent↔app-log). Phase 2d S5-Tail.
+type agentEventRefSide struct {
+	EventID int64
+	RefType string // "observed" | "context" | "caused-by"
+	TSHuman string
 }
 
 // agentTokenSourceRow is one per-source aggregate inside the spawn row.
@@ -310,6 +321,27 @@ func (h *Handler) buildAgentsViewData(ctx context.Context, rows []store.AgentSpa
 					EdgeType:    e.EdgeType,
 					Counterpart: e.ToSpawnID,
 					TSHuman:     formatHumanTime(e.TS),
+				})
+			}
+		}
+
+		// Phase 2d S5-Tail — per-spawn event-refs (ADR-014 Accepted,
+		// Option B). Per-row fetch (not batched) mirrors the
+		// tokens/verdicts pattern — event_refs are sparser than
+		// mailbox-edges so a batched read does not save enough
+		// roundtrips to justify a new store method. Errors collapse to
+		// a partial-render with an ErrorMsg, same as tokens/verdicts.
+		eventRefs, err := h.store.AgentEventRefsForSpawn(ctx, r.ID)
+		if err != nil {
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("event_refs lookup failed for %s: %v", r.ID, err)
+			}
+		} else {
+			for _, er := range eventRefs {
+				row.EventRefs = append(row.EventRefs, agentEventRefSide{
+					EventID: er.EventID,
+					RefType: er.RefType,
+					TSHuman: formatHumanTime(er.TS),
 				})
 			}
 		}

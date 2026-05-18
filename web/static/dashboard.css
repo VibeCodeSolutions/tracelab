@@ -429,6 +429,32 @@ html, body {
 }
 .tl-agent-edge-list li { white-space: nowrap; }
 
+/* Event-Refs sub-list (S5-Tail, ADR-014 Accepted, Option B). Visually
+   adjacent to the mailbox-edges sub-list but a distinct column — the
+   decision keeps agent↔agent and agent↔app-log domains separate. The
+   ref-type renders as a small Pill (mirrors the verdict-pill posture)
+   so the operator's eye picks up the type before the event-id. */
+.tl-agent-event-ref-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.tl-agent-event-ref-list li { white-space: nowrap; }
+.tl-agent-event-ref-type {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--tl-surface-alt);
+  color: var(--tl-ink);
+}
+.tl-agent-event-ref-observed  { background: var(--tl-surface-alt); color: var(--tl-ink-ghost); }
+.tl-agent-event-ref-context   { background: var(--tl-accent-warn); color: #1a1a1a; }
+.tl-agent-event-ref-caused-by { background: var(--tl-accent-err);  color: #fff; }
+
 .tl-agent-verdict {
   display: inline-block;
   padding: 0.1rem 0.45rem;

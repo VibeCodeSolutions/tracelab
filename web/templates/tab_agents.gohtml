@@ -20,9 +20,13 @@
        plain text in S4 — full markdown render is out-of-scope).
 
   Mailbox-edges (in / out, edge-type, counterpart spawn) are surfaced
-  as a per-row sub-list in the rightmost column since Phase 2d S5.
-  Cross-references from mailbox edges to live-tail events (events.id)
-  are still pending an architecture decision — see ADR-014 (Proposed).
+  as a per-row sub-list in the Edges column since Phase 2d S5.
+  Cross-references from agent spawns to live-tail events (events.id)
+  are surfaced as a per-row sub-list in the Event-Refs column since
+  Phase 2d S5-Tail (ADR-014 Accepted, Option B — separate
+  agent_event_refs table). The two sub-lists are deliberately adjacent
+  rather than merged: ADR-014 Decision keeps the agent↔agent and
+  agent↔app-log domains visually distinct.
 
   Dot value: agentsViewData (agents.go).
 */}}
@@ -84,6 +88,7 @@
             <th>Verdict</th>
             <th>Lerneffekt</th>
             <th>Edges</th>
+            <th>Event-Refs</th>
           </tr>
         </thead>
         <tbody>
@@ -142,6 +147,17 @@
                     {{end}}
                     {{range .EdgesOut}}
                       <li><span class="tl-muted">→</span> <span class="tl-mono">{{.EdgeType}}</span> to <span class="tl-mono">{{.Counterpart}}</span></li>
+                    {{end}}
+                  </ul>
+                {{else}}
+                  <span class="tl-muted">—</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .EventRefs}}
+                  <ul class="tl-agent-event-ref-list">
+                    {{range .EventRefs}}
+                      <li><span class="tl-agent-event-ref-type tl-agent-event-ref-{{.RefType}}">{{.RefType}}</span> event <span class="tl-mono">#{{.EventID}}</span></li>
                     {{end}}
                   </ul>
                 {{else}}
